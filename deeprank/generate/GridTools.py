@@ -9,6 +9,7 @@ import pdb2sql
 
 from deeprank.config import logger
 from deeprank.tools import sparse
+from deeprank.selection import ProteinSelectionType
 
 try:
     from tqdm import tqdm
@@ -22,7 +23,7 @@ def logif(string, cond): return logger.info(string) if cond else None
 
 class GridTools(object):
 
-    def __init__(self, molgrp, chain1, chain2,
+    def __init__(self, molgrp, selection,
                  number_of_points=30, resolution=1.,
                  atomic_densities=None, atomic_densities_mode='ind',
                  feature=None, feature_mode='ind',
@@ -69,9 +70,8 @@ class GridTools(object):
         self.molgrp = molgrp
         self.mol_basename = molgrp.name
 
-        # chain IDs
-        self.chain1 = chain1
-        self.chain2 = chain2
+        # protein selection
+        self.selection = selection
 
         # hdf5 file to strore data
         self.hdf5 = self.molgrp.file
@@ -218,8 +218,12 @@ class GridTools(object):
     def get_contact_center(self):
         """Get the center of conact atoms."""
 
-        contact_atoms = self.sqldb.get_contact_atoms(
-            cutoff=self.contact_distance, chain1=self.chain1, chain2=self.chain2)
+        if self.selection.type == ProteinSelectionType.CONTACT:
+            contact_atoms = self.sqldb.get_contact_atoms(
+                cutoff=self.contact_distance, chain1=self.selection.chain1, chain2=self.selection.chain2)
+
+        else:
+            raise TypeError("Cannot get contact center for protein selection type {}".format(self.selection.type))
 
         tmp = []
         for i in contact_atoms.values():
@@ -317,6 +321,10 @@ class GridTools(object):
         Raises:
             ImportError: Description
         """
+
+        if self.selection.type != ProteinSelectionType.CONTACT:
+            raise TypeError("atomic density mapping is not supported for selection type {}".format(self.selection.type))
+
         mode = self.atomic_densities_mode
         logif('-- Map atomic densities on %dx%dx%d grid (mode=%s)' %
               (self.npts[0], self.npts[1], self.npts[2], mode), self.time)
@@ -340,10 +348,10 @@ class GridTools(object):
         # get the contact atoms
         if only_contact:
             index = self.sqldb.get_contact_atoms(cutoff=self.contact_distance,
-                chain1=self.chain1, chain2=self.chain2)
+                                                 selection=self.selection)
         else:
-            index = {self.chain1: self.sqldb.get('rowID', chainID=self.chain1),
-                     self.chain2: self.sqldb.get('rowID', chainID=self.chain2)}
+            index = {self.selection.chain1: self.sqldb.get('rowID', chainID=self.selection.chain1),
+                     self.selection.chain2: self.sqldb.get('rowID', chainID=self.selection.chain2)}
 
         # loop over all the data we want
         for elementtype, vdw_rad in self.local_tqdm(
@@ -352,9 +360,9 @@ class GridTools(object):
             t0 = time()
 
             xyzA = np.array(self.sqldb.get(
-                'x,y,z', rowID=index[self.chain1], element=elementtype))
+                'x,y,z', rowID=index[self.selection.chain1], element=elementtype))
             xyzB = np.array(self.sqldb.get(
-                'x,y,z', rowID=index[self.chain2], element=elementtype))
+                'x,y,z', rowID=index[self.selection.chain2], element=elementtype))
 
             tprocess = time() - t0
 
@@ -583,7 +591,14 @@ class GridTools(object):
                 # i.e chain x y z values
                 if feature_type == 'xyz':
 
-                    chain = [self.chain1, self.chain2][int(line[0])]
+                    if self.selection.type == ProteinSelectionType.CONTACT:
+                        chain = [self.selection.chain1, self.selection.chain2][int(line[0])]
+
+                    elif self.selection.type == ProteinSelectionType.RESIDUE:
+                        chain = self.selection.chain
+                    else:
+                        raise TypeError("Unsupported protein selection type: {}".format(self.selection.type))
+
                     pos = line[1:ntext]
                     feat_values = np.array(line[ntext:])
 
@@ -645,12 +660,16 @@ class GridTools(object):
 
                 # handle the mode
                 fname = feature_name
-                if self.feature_mode == "diff":
-                    coeff = {self.chain1: 1, self.chain2: -1}[chain]
+                if self.feature_mode == "diff" and self.selection.type == ProteinSelectionType.CONTACT:
+                    coeff = {self.selection.chain1: 1, self.selection.chain2: -1}[chain]
                 else:
                     coeff = 1
                 if self.feature_mode == "ind":
-                    chain_name = {self.chain1: '1', self.chain2: '2'}[chain]
+                    if self.selection.type == ProteinSelectionType.CONTACT:
+                        chain_name = {self.selection.chain1: '1', self.selection.chain2: '2'}[chain]
+                    else:
+                        chain_name = ''
+
                     fname = feature_name + "_chain" + chain_name
                 tprocess += time() - t0
 

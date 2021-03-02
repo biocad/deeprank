@@ -13,6 +13,7 @@ import deeprank
 from deeprank import config
 from deeprank.config import logger
 from deeprank.generate import GridTools as gt
+from deeprank.selection import ProteinSelectionType
 import pdb2sql
 from pdb2sql.align import align as align_along_axis
 from pdb2sql.align import align_interface
@@ -35,7 +36,7 @@ def _printif(string, cond): return print(string) if cond else None
 
 class DataGenerator(object):
 
-    def __init__(self, chain1, chain2,
+    def __init__(self, selection,
                  pdb_select=None, pdb_source=None,
                  pdb_native=None, pssm_source=None, align=None,
                  compute_targets=None, compute_features=None,
@@ -44,8 +45,7 @@ class DataGenerator(object):
         """Generate the data (features/targets/maps) required for deeprank.
 
         Args:
-            chain1 (str): First chain ID
-            chain2 (str): Second chain ID
+            selection (selection object): the protein region of interest
             pdb_select (list(str), optional): List of individual conformation for mapping
             pdb_source (list(str), optional): List of folders where to find the pdbs for mapping
             pdb_native (list(str), optional): List of folders where to find the native comformations,
@@ -75,8 +75,7 @@ class DataGenerator(object):
             >>> h5file = '1ak4.hdf5'
             >>>
             >>> #init the data assembler
-            >>> database = DataGenerator(chain1='C',
-            >>>                          chain2='D',
+            >>> database = DataGenerator(selection=ProteinContactSelection(chain1='C', chain2='D'),
             >>>                          pdb_source=pdb_source,
             >>>                          pdb_native=pdb_native,
             >>>                          pssm_source=pssm_source,
@@ -88,8 +87,7 @@ class DataGenerator(object):
             >>>                          hdf5=h5file)
         """
 
-        self.chain1 = chain1
-        self.chain2 = chain2
+        self.selection = selection
 
         self.pdb_select = pdb_select or []
         self.pdb_source = pdb_source or []
@@ -198,8 +196,7 @@ class DataGenerator(object):
         >>> h5file = '1ak4.hdf5'
         >>>
         >>> #init the data assembler
-        >>> database = DataGenerator(chain1='C',
-        >>>                          chain2='D',
+        >>> database = DataGenerator(selection=ProteinContactSelection(chain1='C', chain2='D'),
         >>>                          pdb_source=pdb_source,
         >>>                          pdb_native=pdb_native,
         >>>                          pssm_source=pssm_source,
@@ -352,8 +349,7 @@ class DataGenerator(object):
                                                                 )],
                                                                 molgrp['features'],
                                                                 molgrp['features_raw'],
-                                                                self.chain1,
-                                                                self.chain2,
+                                                                self.selection,
                                                                 self.logger)
                     if feature_error_flag:
                         self.feature_error += [mol_name]
@@ -711,8 +707,7 @@ class DataGenerator(object):
                                                     molgrp['complex'][()],
                                                     molgrp['features'],
                                                     molgrp['features_raw'],
-                                                    self.chain1,
-                                                    self.chain2,
+                                                    self.selection,
                                                     self.logger)
 
                 if error_flag:
@@ -954,8 +949,7 @@ class DataGenerator(object):
                                                 molgrp['complex'][()],
                                                 molgrp['features'],
                                                 molgrp['features_raw'],
-                                                self.chain1,
-                                                self.chain2,
+                                                self.selection,
                                                 self.logger)
 
         f5.close()
@@ -968,21 +962,29 @@ class DataGenerator(object):
 
     def _get_grid_center(self, pdb, contact_distance):
 
-        sqldb = pdb2sql.interface(pdb)
-        contact_atoms = sqldb.get_contact_atoms(cutoff=contact_distance,
-            chain1=self.chain1, chain2=self.chain2)
+        with pdb2sql.interface(pdb) as sqldb:
 
-        tmp = []
-        for i in contact_atoms.values():
-            tmp.extend(i)
-        contact_atoms = list(set(tmp))
+            if self.selection.type == ProteinSelectionType.CONTACT:
 
-        center_contact = np.mean(
-            np.array(sqldb.get('x,y,z', rowID=contact_atoms)), 0)
+                contact_atoms = sqldb.get_contact_atoms(cutoff=contact_distance,
+                                                        chain1=self.selection.chain1, chain2=self.selection.chain2)
 
-        sqldb._close()
+                tmp = []
+                for i in contact_atoms.values():
+                    tmp.extend(i)
+                contact_atoms = list(set(tmp))
 
-        return center_contact
+                center = np.mean(
+                    np.array(sqldb.get('x,y,z', rowID=contact_atoms)), 0)
+
+            elif self.selection.type == ProteinSelectionType.RESIDUE:
+
+                center = np.mean(sqldb.get_xyz(chainID=self.selection.chain, resSeq=self.selection.number, name='CA'), 0)
+
+            else:
+                raise TypeError("Unsupported protein selection type: {}".format(self.selection.type))
+
+        return center
 
     def precompute_grid(self,
                         grid_info,
@@ -1012,8 +1014,7 @@ class DataGenerator(object):
 
             # compute the data we want on the grid
             gt.GridTools(molgrp=f5[mol],
-                         chain1=self.chain1,
-                         chain2=self.chain2,
+                         selection=self.selection,
                          number_of_points=grid_info['number_of_points'],
                          resolution=grid_info['resolution'],
                          contact_distance=contact_distance,
@@ -1185,8 +1186,7 @@ class DataGenerator(object):
                 # compute the data we want on the grid
                 gt.GridTools(
                     molgrp=f5[mol],
-                    chain1=self.chain1,
-                    chain2=self.chain2,
+                    selection=self.selection,
                     number_of_points=grid_info['number_of_points'],
                     resolution=grid_info['resolution'],
                     atomic_densities=grid_info['atomic_densities'],
@@ -1514,7 +1514,7 @@ class DataGenerator(object):
 # ====================================================================================
 
     @staticmethod
-    def _compute_features(feat_list, pdb_data, featgrp, featgrp_raw, chain1, chain2, logger):
+    def _compute_features(feat_list, pdb_data, featgrp, featgrp_raw, selection, logger):
         """Compute the features.
 
         Args:
@@ -1524,8 +1524,7 @@ class DataGenerator(object):
             pdb_data (bytes): PDB translated in bytes
             featgrp (str): name of the group where to store the xyz feature
             featgrp_raw (str): name of the group where to store the raw feature
-            chain1 (str): First chain ID
-            chain2 (str): Second chain ID
+            selection (selection object): the protein region of interest
             logger (logger): name of logger object
 
         Return:
@@ -1535,8 +1534,7 @@ class DataGenerator(object):
         for feat in feat_list:
             try:
                 feat_module = importlib.import_module(feat, package=None)
-                feat_module.__compute_feature__(pdb_data, featgrp, featgrp_raw,
-                    chain1, chain2)
+                feat_module.__compute_feature__(pdb_data, featgrp, featgrp_raw, selection)
             except Exception as ex:
                 logger.exception(ex)
                 error_flag = True
@@ -1616,7 +1614,7 @@ class DataGenerator(object):
         if dict_align['selection'] == 'interface':
             sqldb = align_interface(pdbfile, plane=dict_align['plane'],
                                     export=dict_align['export'],
-                                    chain1=self.chain1, chain2=self.chain2)
+                                    selection=self.selection)
 
         else:
 
