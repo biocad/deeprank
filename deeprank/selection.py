@@ -1,52 +1,58 @@
 from enum import Enum
 
 
-class ProteinSelectionType(Enum):
-    CONTACT = 1
-    RESIDUE = 2
-
-    def __str__(self):
-        return self.name
-
-    def __repr__(self):
-        return self.name
-
-
-class BaseProteinSelection:
-    pass 
-
-
-class ProteinContactSelection:
-    def __init__(self, chain1, chain2):
+class ContactPair:
+    def __init__(self, chain1, chain2, distance=8.5):
         self.chain1 = chain1
         self.chain2 = chain2
-        self.type = ProteinSelectionType.CONTACT
+        self.distance = distance
 
-    def get_chain_number(self, chain_id):
-        if self.chain1 == chain_id
-            return 0
 
-        elif self.chain2 == chain_id:
-            return 1
+class Subset:
+    def __init__(self, chain_id, residue_number=None, atom_name=None):
+        # None means: don't care
+        self.chain = chain_id
+        self.number = residue_number
+        self.atom = atom_name
 
-        else:
-            raise ValueError("no such chain: {}".format(chain_id))
 
-    def get_chains(self):
-        return [self.chain1, self.chain2]
+class ProteinSelection:
+    def __init__(self):
+        self._subsets = set([])
+        self._contact_pairs = set([])
 
-class SingleResidueSelection:
-    def __init__(self, chain, number):
-        self.chain = chain
-        self.number = number
-        self.type = ProteinSelectionType.RESIDUE
+    def add_subset(self, subset):
+        self._subsets.add(subset)
+        return self
 
-    def get_chain_number(self, chain_id):
-        if self.chain == chain_id:
-            return 0
+    def add_contact_pair(self, pair):
+        self._contact_pairs.add(pair)
+        return self
 
-        else:
-            raise ValueError("no such chain: {}".format(chain_id))
+    @property
+    def contact_pairs(self):
+        return self._contact_pairs
 
-    def get_chains(self):
-        return [self.chain]
+    @property
+    def subsets(self):
+        return self._subsets
+
+
+def sql_get(interface, selection, variable_name, **kwargs):
+
+    atoms = []
+    for pair in selection.contact_pairs:
+        atoms.extend(interface.get_contact_atoms(chain1=pair.chain1, chain2=pair.chain2, cutoff=pair.distance))
+
+    for subset in selection.subsets:
+        selection_kwargs = {}
+        if subset.chain is not None:
+            selection_kwargs['chainID'] = subset.chain
+        if subset.number is not None:
+            selection_kwargs['resSeq'] = subset.number
+        if subset.atom is not None:
+            selection_kwargs['name'] = subset.atom
+
+        atoms.extend(interface.get('rowID', **selection_kwargs))
+
+    return interface.get(variable_name, rowID=atoms, **kwargs)
