@@ -13,7 +13,6 @@ import deeprank
 from deeprank import config
 from deeprank.config import logger
 from deeprank.generate import GridTools as gt
-from deeprank.selection import ProteinSelectionType
 import pdb2sql
 from pdb2sql.align import align as align_along_axis
 from pdb2sql.align import align_interface
@@ -45,7 +44,7 @@ class DataGenerator(object):
         """Generate the data (features/targets/maps) required for deeprank.
 
         Args:
-            selection (selection object): the protein region of interest
+            selection (selection object): Protein region of interest
             pdb_select (list(str), optional): List of individual conformation for mapping
             pdb_source (list(str), optional): List of folders where to find the pdbs for mapping
             pdb_native (list(str), optional): List of folders where to find the native comformations,
@@ -75,7 +74,7 @@ class DataGenerator(object):
             >>> h5file = '1ak4.hdf5'
             >>>
             >>> #init the data assembler
-            >>> database = DataGenerator(selection=ProteinContactSelection(chain1='C', chain2='D'),
+            >>> database = DataGenerator(selection=ProteinSelection().add_contact_pair(ContactPair('C', 'D')),
             >>>                          pdb_source=pdb_source,
             >>>                          pdb_native=pdb_native,
             >>>                          pssm_source=pssm_source,
@@ -196,7 +195,7 @@ class DataGenerator(object):
         >>> h5file = '1ak4.hdf5'
         >>>
         >>> #init the data assembler
-        >>> database = DataGenerator(selection=ProteinContactSelection(chain1='C', chain2='D'),
+        >>> database = DataGenerator(ProteinSelection().add_contact_pair(ContactPair('C', 'D')),
         >>>                          pdb_source=pdb_source,
         >>>                          pdb_native=pdb_native,
         >>>                          pssm_source=pssm_source,
@@ -961,30 +960,8 @@ class DataGenerator(object):
 # ====================================================================================
 
     def _get_grid_center(self, pdb, contact_distance):
-
         with pdb2sql.interface(pdb) as sqldb:
-
-            if self.selection.type == ProteinSelectionType.CONTACT:
-
-                contact_atoms = sqldb.get_contact_atoms(cutoff=contact_distance,
-                                                        chain1=self.selection.chain1, chain2=self.selection.chain2)
-
-                tmp = []
-                for i in contact_atoms.values():
-                    tmp.extend(i)
-                contact_atoms = list(set(tmp))
-
-                center = np.mean(
-                    np.array(sqldb.get('x,y,z', rowID=contact_atoms)), 0)
-
-            elif self.selection.type == ProteinSelectionType.RESIDUE:
-
-                center = np.mean(sqldb.get_xyz(chainID=self.selection.chain, resSeq=self.selection.number, name='CA'), 0)
-
-            else:
-                raise TypeError("Unsupported protein selection type: {}".format(self.selection.type))
-
-        return center
+            return np.mean(sql_get(sqldb, self.selection, "x,y,z"), 0)
 
     def precompute_grid(self,
                         grid_info,
@@ -1524,7 +1501,7 @@ class DataGenerator(object):
             pdb_data (bytes): PDB translated in bytes
             featgrp (str): name of the group where to store the xyz feature
             featgrp_raw (str): name of the group where to store the raw feature
-            selection (selection object): the protein region of interest
+            selection (selection object): protein region of interest
             logger (logger): name of logger object
 
         Return:

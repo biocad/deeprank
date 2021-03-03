@@ -9,11 +9,12 @@ class ContactPair:
 
 
 class Subset:
-    def __init__(self, chain_id, residue_number=None, atom_name=None):
+    def __init__(self, chain_id, residue_number=None, atom_name=None, element=None):
         # None means: don't care
         self.chain = chain_id
         self.number = residue_number
         self.atom = atom_name
+        self.element = element
 
 
 class ProteinSelection:
@@ -52,6 +53,8 @@ def sql_get(interface, selection, variable_name, **kwargs):
             selection_kwargs['resSeq'] = subset.number
         if subset.atom is not None:
             selection_kwargs['name'] = subset.atom
+        if subset.element is not None:
+            selection_kwargs['element'] = subset.element
 
         atoms.extend(interface.get('rowID', **selection_kwargs))
 

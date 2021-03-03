@@ -9,7 +9,6 @@ import pdb2sql
 
 from deeprank.config import logger
 from deeprank.tools import sparse
-from deeprank.selection import ProteinSelectionType
 
 try:
     from tqdm import tqdm
@@ -34,8 +33,7 @@ class GridTools(object):
 
         Args:
             molgrp(str): name of the group of the molecule in the HDF5 file.
-            chain1 (str): First chain ID.
-            chain2 (str): Second chain ID.
+            selection(selection object): protein region of interest
             number_of_points(int, optional): number of points we want in
                 each direction of the grid.
             resolution(float, optional): distance(in Angs) between two points.
@@ -70,7 +68,7 @@ class GridTools(object):
         self.molgrp = molgrp
         self.mol_basename = molgrp.name
 
-        # protein selection
+        # selection
         self.selection = selection
 
         # hdf5 file to strore data
@@ -214,25 +212,11 @@ class GridTools(object):
 
         self.sqldb = pdb2sql.interface(self.molgrp['complex'][()])
 
-    # get the contact atoms and interface center
+    # get the contact atoms
     def get_contact_center(self):
-        """Get the center of conact atoms."""
+        """Get the center of conract atoms."""
 
-        if self.selection.type == ProteinSelectionType.CONTACT:
-            contact_atoms = self.sqldb.get_contact_atoms(
-                cutoff=self.contact_distance, chain1=self.selection.chain1, chain2=self.selection.chain2)
-
-        else:
-            raise TypeError("Cannot get contact center for protein selection type {}".format(self.selection.type))
-
-        tmp = []
-        for i in contact_atoms.values():
-            tmp.extend(i)
-        contact_atoms = list(set(tmp))
-
-        # get interface center
-        self.center_contact = np.mean(
-            np.array(self.sqldb.get('x,y,z', rowID=contact_atoms)), 0)
+        return np.mean(sql_get(self.sqldb, self.selection, 'x,y,z'), 0)
 
     ################################################################
     # shortcut to add all the feature a
@@ -312,7 +296,7 @@ class GridTools(object):
     ################################################################
 
     # compute all the atomic densities data
-    def map_atomic_densities(self, only_contact=True):
+    def map_atomic_densities(self):
         """Map the atomic densities to the grid.
 
         Args:
@@ -321,10 +305,6 @@ class GridTools(object):
         Raises:
             ImportError: Description
         """
-
-        if self.selection.type != ProteinSelectionType.CONTACT:
-            raise TypeError("atomic density mapping is not supported for selection type {}".format(self.selection.type))
-
         mode = self.atomic_densities_mode
         logif('-- Map atomic densities on %dx%dx%d grid (mode=%s)' %
               (self.npts[0], self.npts[1], self.npts[2], mode), self.time)
@@ -345,84 +325,65 @@ class GridTools(object):
             z_gpu = gpuarray.to_gpu(self.z.astype(np.float32))
             grid_gpu = gpuarray.zeros(self.npts, np.float32)
 
-        # get the contact atoms
-        if only_contact:
-            index = self.sqldb.get_contact_atoms(cutoff=self.contact_distance,
-                                                 selection=self.selection)
-        else:
-            index = {self.selection.chain1: self.sqldb.get('rowID', chainID=self.selection.chain1),
-                     self.selection.chain2: self.sqldb.get('rowID', chainID=self.selection.chain2)}
+        # get the selected atoms
+        atoms = sql_get(self.sqldb, self.selection, "rowID")
+        chains = set(sql_get(self.sqldb, self.selection, "chainID"))
 
         # loop over all the data we want
-        for elementtype, vdw_rad in self.local_tqdm(
-                self.atomic_densities.items()):
+        for elementtype, vdw_rad in self.local_tqdm(self.atomic_densities.items()):
 
             t0 = time()
 
-            xyzA = np.array(self.sqldb.get(
-                'x,y,z', rowID=index[self.selection.chain1], element=elementtype))
-            xyzB = np.array(self.sqldb.get(
-                'x,y,z', rowID=index[self.selection.chain2], element=elementtype))
+            xyz_per_chain = {chain: np.array(self.sqldb.get('x,y,z', rowID=atoms, element=elementtype))
+                             for chain in chains}
 
             tprocess = time() - t0
+
+            densities_per_chain = {}
 
             t0 = time()
             # if we use CUDA
             if self.cuda:  # pragma: no cover
 
-                # reset the grid
-                grid_gpu *= 0
+                for chain, xyz in xyz_per_chain.items():
+                    # reset the grid
+                    grid_gpu *= 0
 
-                # get the atomic densities of chain A
-                for pos in xyzA:
-                    x0, y0, z0 = pos.astype(np.float32)
-                    vdw = np.float32(vdw_rad)
-                    self.cuda_atomic(
-                        vdw, x0, y0, z0, x_gpu, y_gpu, z_gpu, grid_gpu, block=tuple(
-                            self.gpu_block), grid=tuple(
-                            self.gpu_grid))
-                    atdensA = grid_gpu.get()
-
-                # reset the grid
-                grid_gpu *= 0
-
-                # get the atomic densities of chain B
-                for pos in xyzB:
-                    x0, y0, z0 = pos.astype(np.float32)
-                    vdw = np.float32(vdw_rad)
-                    self.cuda_atomic(
-                        vdw, x0, y0, z0, x_gpu, y_gpu, z_gpu, grid_gpu, block=tuple(
-                            self.gpu_block), grid=tuple(
-                            self.gpu_grid))
-                    atdensB = grid_gpu.get()
+                    # get the atomic densities of chain A
+                    for pos in xyz:
+                        x0, y0, z0 = pos.astype(np.float32)
+                        vdw = np.float32(vdw_rad)
+                        self.cuda_atomic(
+                            vdw, x0, y0, z0, x_gpu, y_gpu, z_gpu, grid_gpu, block=tuple(
+                                self.gpu_block), grid=tuple(
+                                self.gpu_grid))
+                        densities_per_chain[chain] = grid_gpu.get()
 
             # if we don't use CUDA
             else:
+                for chain, xyz in xyz_per_chain.items():
+                    densities_per_chain[chain] = np.zeros(self.npts)
 
-                # init the grid
-                atdensA = np.zeros(self.npts)
-                atdensB = np.zeros(self.npts)
-
-                # run on the atoms
-                for pos in xyzA:
-                    atdensA += self.densgrid(pos, vdw_rad)
-
-                # run on the atoms
-                for pos in xyzB:
-                    atdensB += self.densgrid(pos, vdw_rad)
+                    for pos in xyz:
+                        densities_per_chain[chain] +=  self.densgrid(pos, vdw_rad)
 
             # create the final grid: A - B
             if mode == 'diff':
-                self.atdens[elementtype] = atdensA - atdensB
+                contact_pairs = self.selection.contact_pairs
+
+                if len(contact_pairs) != 1:
+                    raise ValueError("diff mode is only supported for a single contact selection")
+
+                self.atdens[elementtype] = densities_per_chain[contact_pairs[0].chain1] - densities_per_chain[contact_pairs[0].chain2]
 
             # create the final grid: A + B
             elif mode == 'sum':
-                self.atdens[elementtype] = atdensA + atdensB
+                self.atdens[elementtype] = sum(densities_per_chain.values())
 
             # create the final grid: A and B
             elif mode == 'ind':
-                self.atdens[elementtype + '_chain1'] = atdensA
-                self.atdens[elementtype + '_chain2'] = atdensB
+                for chain, density in densities_per_chain.items():
+                    self.atdens[elementtype + '_' + chain] = density
             else:
                 raise ValueError(f'Atomic density mode {mode} not recognized')
 
@@ -486,6 +447,8 @@ class GridTools(object):
             ImportError: Description
             ValueError: Description
         """
+
+        chains = set(sql_get(self.sqldb, self.selection, "chainID"))
 
         # declare the total dictionary
         dict_data = {}
@@ -557,20 +520,17 @@ class GridTools(object):
             # that will in fine holds all the data
             if nFeat == 1:
                 if self.feature_mode == 'ind':
-                    dict_data[feature_name + '_chain1'] = np.zeros(self.npts)
-                    dict_data[feature_name + '_chain2'] = np.zeros(self.npts)
+                    for chain in chains:
+                        dict_data[feature_name + '_' + chain] = np.zeros(self.npts)
                 else:
                     dict_data[feature_name] = np.zeros(self.npts)
             else: # do we need that ?!
                 for iF in range(nFeat):
                     if self.feature_mode == 'ind':
-                        dict_data[feature_name + '_chain1_%03d' %
-                                  iF] = np.zeros(self.npts)
-                        dict_data[feature_name + '_chain2_%03d' %
-                                  iF] = np.zeros(self.npts)
+                        for chain in chains:
+                            dict_data[feature_name + '_%s_%03d' % (chain, iF)] = np.zeros(self.npts)
                     else:
-                        dict_data[feature_name + '_%03d' %
-                                  iF] = np.zeros(self.npts)
+                        dict_data[feature_name + '_%03d' % iF] = np.zeros(self.npts)
 
             # skip empty features
             if data.shape[0] == 0:
@@ -591,14 +551,7 @@ class GridTools(object):
                 # i.e chain x y z values
                 if feature_type == 'xyz':
 
-                    if self.selection.type == ProteinSelectionType.CONTACT:
-                        chain = [self.selection.chain1, self.selection.chain2][int(line[0])]
-
-                    elif self.selection.type == ProteinSelectionType.RESIDUE:
-                        chain = self.selection.chain
-                    else:
-                        raise TypeError("Unsupported protein selection type: {}".format(self.selection.type))
-
+                    chain = line[0]
                     pos = line[1:ntext]
                     feat_values = np.array(line[ntext:])
 
@@ -660,17 +613,16 @@ class GridTools(object):
 
                 # handle the mode
                 fname = feature_name
-                if self.feature_mode == "diff" and self.selection.type == ProteinSelectionType.CONTACT:
-                    coeff = {self.selection.chain1: 1, self.selection.chain2: -1}[chain]
+                if self.feature_mode == "diff":
+                    contact_pairs = self.selection.contact_pairs
+                    if len(contact_pairs) != 1:
+                        raise ValueError("diff mode is only supported for single contact selection")
+
+                    coeff = {contact_pairs[0].chain1: 1, contact_pairs[0].chain2: -1}[chain]
                 else:
                     coeff = 1
                 if self.feature_mode == "ind":
-                    if self.selection.type == ProteinSelectionType.CONTACT:
-                        chain_name = {self.selection.chain1: '1', self.selection.chain2: '2'}[chain]
-                    else:
-                        chain_name = ''
-
-                    fname = feature_name + "_chain" + chain_name
+                    fname = feature_name + '_' + chain
                 tprocess += time() - t0
 
                 t0 = time()
