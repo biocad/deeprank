@@ -172,7 +172,6 @@ class DataGenerator(object):
             verbose=False,
             remove_error=True,
             prog_bar=False,
-            contact_distance=8.5,
             random_seed=None):
         """Create the hdf5 file architecture and compute the features/targets.
 
@@ -180,7 +179,6 @@ class DataGenerator(object):
             verbose (bool, optional): Print creation details
             remove_error (bool, optional): remove the groups that errored
             prog_bar (bool, optional): use tqdm
-            contact_distance (float): contact distance cutoff, defaults to 8.5Å
             random_seed (int): random seed for getting rotation axis and angle
 
         Raises:
@@ -397,8 +395,7 @@ class DataGenerator(object):
                 molgrp.require_group('grid_points')
 
                 try:
-                    center = self._get_grid_center(
-                        molgrp['complex'][()], contact_distance)
+                    center = self._get_grid_center(molgrp['complex'][()])
                     molgrp['grid_points'].create_dataset(
                         'center', data=center)
                     if verbose:
@@ -959,13 +956,12 @@ class DataGenerator(object):
 #
 # ====================================================================================
 
-    def _get_grid_center(self, pdb, contact_distance):
+    def _get_grid_center(self, pdb):
         with pdb2sql.interface(pdb) as sqldb:
             return np.mean(sql_get(sqldb, self.selection, "x,y,z"), 0)
 
     def precompute_grid(self,
                         grid_info,
-                        contact_distance=8.5,
                         prog_bar=False,
                         time=False,
                         try_sparse=True):
@@ -994,7 +990,6 @@ class DataGenerator(object):
                          selection=self.selection,
                          number_of_points=grid_info['number_of_points'],
                          resolution=grid_info['resolution'],
-                         contact_distance=contact_distance,
                          time=time,
                          prog_bar=prog_bar,
                          try_sparse=try_sparse)

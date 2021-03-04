@@ -26,7 +26,6 @@ class GridTools(object):
                  number_of_points=30, resolution=1.,
                  atomic_densities=None, atomic_densities_mode='ind',
                  feature=None, feature_mode='ind',
-                 contact_distance=8.5,
                  cuda=False, gpu_block=None, cuda_func=None, cuda_atomic=None,
                  prog_bar=False, time=False, try_sparse=True):
         """Map the feature of a complex on the grid.
@@ -46,8 +45,6 @@ class GridTools(object):
                 hdf5_file['< molgrp > /features/] will be mapped.
             feature_mode(str, optional): Mode for mapping
                 (deprecated must be 'ind').
-            contact_distance(float, optional): the dmaximum distance
-                between two contact atoms default 8.5Å.
             cuda(bool, optional): Use CUDA or not.
             gpu_block(tuple(int), optional): GPU block size to use.
             cuda_func(None, optional): Name of the CUDA function to be
@@ -125,9 +122,6 @@ class GridTools(object):
 
         # conversion from boh to angs for VMD visualization
         self.bohr2ang = 0.52918
-
-        # contact distance to locate the interface
-        self.contact_distance = contact_distance
 
         # progress bar
         self.local_tqdm = lambda x: tqdm(x) if prog_bar else x
