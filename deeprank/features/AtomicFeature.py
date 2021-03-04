@@ -5,12 +5,12 @@ import numpy as np
 import pdb2sql
 
 from deeprank.features import FeatureClass
-from deeprank.selection import ProteinContactSelection, ProteinSelectionType
+from deeprank.selection import ContactPair, ProteinSelection, sql_get
 
 
 class AtomicFeature(FeatureClass):
 
-    def __init__(self, pdbfile, selection=ProteinContactSelection('A', 'B'), param_charge=None,
+    def __init__(self, pdbfile, selection=ProteinSelection().add_contact_pair(ContactPair('A', 'B')), param_charge=None,
                 param_vdw=None, patch_file=None, contact_cutoff=8.5,
                 verbose=False):
         """Compute the Coulomb, van der Waals interaction and charges.
@@ -19,7 +19,8 @@ class AtomicFeature(FeatureClass):
 
             pdbfile (str): pdb file of the molecule
 
-            selection (protein selection): protein region of interest
+            selection (selection object): the protein region of interest
+            chain2 (str): Second chain ID, defaults to 'B'
 
             param_charge (str): file name of the force field file
                 containing the charges e.g. protein-allhdg5.4_new.top.
@@ -99,8 +100,9 @@ class AtomicFeature(FeatureClass):
         # read the vdw param file
         self.read_vdw_file()
 
-        # get the contact atoms
-        self.get_contact_atoms()
+        # get the atoms
+        self.selection_atoms = sql_get(self.sqldb, self.selection, "rowID")
+        self.selection_chains = sorted(set(sql_get(self.sqldb, self.selection, "chainID")))
 
     ####################################################################
     #
@@ -226,20 +228,24 @@ class AtomicFeature(FeatureClass):
         # TODO: replace this function with pdb2sql.get_contact_atoms
         # but need to add a filter parameter to filter out ligand.
 
-        if self.selection.type != ProteinSelectionType.CONTACT:
-            raise TypeError("cannot get contact atoms for protein selection type {}".format(self.selection.type))
+        contact_pairs = self.selection.contact_pairs
+        if len(contact_pairs) != 1:
+            raise ValueError("cannot compute contact atoms for a selection of {} contact pairs".format(len(contact_pairs)))
+
+        chain1 = contact_pairs[0].chain1
+        chain2 = contact_pairs[0].chain2
 
         # position of the chains
-        xyz1 = np.array(self.sqldb.get('x,y,z', chainID=self.selection.chain1))
-        xyz2 = np.array(self.sqldb.get('x,y,z', chainID=self.selection.chain2))
+        xyz1 = np.array(self.sqldb.get('x,y,z', chainID=chain1))
+        xyz2 = np.array(self.sqldb.get('x,y,z', chainID=chain2))
 
         # rowID of the chains
-        index_a = self.sqldb.get('rowID', chainID=self.selection.chain1)
-        index_b = self.sqldb.get('rowID', chainID=self.selection.chain2)
+        index_a = self.sqldb.get('rowID', chainID=chain1)
+        index_b = self.sqldb.get('rowID', chainID=chain2)
 
         # resName of the chains
-        resName1 = np.array(self.sqldb.get('resName', chainID=self.selection.chain1))
-        resName2 = np.array(self.sqldb.get('resName', chainID=self.selection.chain2))
+        resName1 = np.array(self.sqldb.get('resName', chainID=chain1))
+        resName2 = np.array(self.sqldb.get('resName', chainID=chain2))
 
         # declare the contact atoms
         self.contact_atoms_A = []
@@ -285,39 +291,20 @@ class AtomicFeature(FeatureClass):
         contacting."""
 
         # extract the data
-        dataA = self.sqldb.get(self.residue_key,
-                               rowID=self.contact_atoms_A)
-        dataB = self.sqldb.get(self.residue_key,
-                               rowID=self.contact_atoms_B)
-
-        # create tuple cause we want to hash through it
-        dataA = [tuple(x) for x in dataA]
-        dataB = [tuple(x) for x in dataB]
+        data = self.sqldb.get(self.residue_key, self.selection_atoms)
 
         # extract uniques
-        resA = list(set(dataA))
-        resB = list(set(dataB))
+        res = list(set(data))
 
-        # init the list
-        index_contact_A, index_contact_B = [], []
-
-        # contact of chain A
-        for resdata in resA:
+        # extend
+        index = []
+        for resdata in res:
             chainID, resSeq, resName = resdata
-            index_contact_A += self.sqldb.get('rowID', chainID=chainID,
-                                              resName=resName, resSeq=resSeq)
+            index += self.sqldb.get('rowID', chainID=chainID,
+                                             resName=resName,
+                                             resSeq=resSeq)
 
-        # contact of chain B
-        for resdata in resB:
-            chainID, resSeq, resName = resdata
-            index_contact_B += self.sqldb.get('rowID', chainID=chainID,
-                                              resName=resName, resSeq=resSeq)
-
-        # make sure that we don't have double (maybe optional)
-        index_contact_A = sorted(set(index_contact_A))
-        index_contact_B = sorted(set(index_contact_B))
-
-        return index_contact_A, index_contact_B
+        return index
 
     ####################################################################
     #
@@ -529,13 +516,12 @@ class AtomicFeature(FeatureClass):
 
         # entire residue or not
         if extend_contact_to_residue:
-            indA, indB = self._extend_contact_to_residue()
-            index_contact_atoms = indA + indB
+            index_atoms = self._extend_contact_to_residue()
         else:
-            index_contact_atoms = self.contact_atoms_A + self.contact_atoms_B
+            index_atoms = self.selection_atoms
 
         # loop over the chain A
-        for i in index_contact_atoms:
+        for i in atoms:
 
             # atinfo
             key = tuple(atinfo[i])
@@ -544,11 +530,9 @@ class AtomicFeature(FeatureClass):
             charge_data[key] = [charge[i]]
 
             # xyz format
-            chain_dict = [self.selection.get_chain_number(key[0])
-
+            chain_dict = [self.selection_chains.index(key[0])]
             key = tuple(chain_dict + xyz[i, :].tolist())
             charge_data_xyz[key] = [charge[i]]
-
 
         # add the electrosatic feature
         self.feature_data['charge'] = charge_data
@@ -569,8 +553,12 @@ class AtomicFeature(FeatureClass):
             save_interactions (bool, optional): save the itneractions to file.
         """
 
-        if self.selection.type != ProteinSelectionType.CONTACT:
-            raise TypeError("pair interactions unsupported for selection type {}".format(self.selection.type))
+        contact_pairs = self.selection.contact_pairs
+        if len(contact_pairs) != 1:
+            raise ValueError("cannot evaluate pair interaction for a selection of {} contact pairs".format(len(contact_pairs)))
+
+        chain1 = contact_pairs[0].chain1
+        chain2 = contact_pairs[0].chain2
 
         if self.verbose:
             print('-- Compute interaction energy for contact pairs only')
@@ -595,9 +583,8 @@ class AtomicFeature(FeatureClass):
         vdw_data_xyz = {}
 
         # define the matrices
-        natA = len(self.sqldb.get('x', chainID=self.selection.chain1))
-        natB = len(self.sqldb.get('x', chainID=self.selection.chain2))
-
+        natA, natB = len(self.sqldb.get('x', chainID=chain1)), len(
+            self.sqldb.get('x', chainID=chain2))
         matrix_elec = np.zeros((natA, natB))
         matrix_vdw = np.zeros((natA, natB))
 
@@ -745,43 +732,48 @@ class AtomicFeature(FeatureClass):
             contact_only (bool, optional): consider only contact atoms
         """
 
-        if self.selection.type != ProteinSelectionType.CONTACT:
-            raise TypeError("coulomb interactions unsupported for selection type {}".format(self.selection.type))
-
-        if self.verbose:
+        contact_pairs = self.selection.contact_pairs
+        if len(contact_pairs) != 1:
+            raise ValueError("cannot compute interchain for the set of {} contact pairs".format(len(contact_pairs)))
 
         if self.verbose:
             print('-- Compute coulomb energy interchain only')
 
+        chain1 = contact_pairs[0].chain1
+        chain2 = contact_pairs[0].chain2
+
+        contact_atoms_A = self.sqldb.get('rowID', chainID=chain1)
+        contact_atoms_B = self.sqldb.get('rowID', chainID=chain2)
+
         if contact_only:
 
             xyzA = np.array(self.sqldb.get(
-                'x,y,z', rowID=self.contact_atoms_A))
+                'x,y,z', rowID=contact_atoms_A))
             xyzB = np.array(self.sqldb.get(
-                'x,y,z', rowID=self.contact_atoms_B))
+                'x,y,z', rowID=contact_atoms_B))
 
             chargeA = np.array(self.sqldb.get(
-                'CHARGE', rowID=self.contact_atoms_A))
+                'CHARGE', rowID=contact_atoms_A))
             chargeB = np.array(self.sqldb.get(
-                'CHARGE', rowID=self.contact_atoms_B))
+                'CHARGE', rowID=contact_atoms_B))
 
             atinfoA = self.sqldb.get(
-                self.atom_key, rowID=self.contact_atoms_A)
+                self.atom_key, rowID=contact_atoms_A)
             atinfoB = self.sqldb.get(
-                self.atom_key, rowID=self.contact_atoms_B)
+                self.atom_key, rowID=contact_atoms_B)
 
         else:
 
-            xyzA = np.array(self.sqldb.get('x,y,z', chainID=self.selection.chain1))
-            xyzB = np.array(self.sqldb.get('x,y,z', chainID=self.selection.chain2))
+            xyzA = np.array(self.sqldb.get('x,y,z', chainID=chain1))
+            xyzB = np.array(self.sqldb.get('x,y,z', chainID=chain2))
 
-            chargeA = np.array(self.sqldb.get('CHARGE', chainID=self.selection.chain1))
-            chargeB = np.array(self.sqldb.get('CHARGE', chainID=self.selection.chain2))
+            chargeA = np.array(self.sqldb.get('CHARGE', chainID=chain1))
+            chargeB = np.array(self.sqldb.get('CHARGE', chainID=chain2))
 
             atinfoA = self.sqldb.get(
-                self.atom_key, chainID=self.selection.chain1)
+                self.atom_key, chainID=chain1)
             atinfoB = self.sqldb.get(
-                self.atom_key, chainID=self.selection.chain2)
+                self.atom_key, chainID=chain2)
 
         natA, natB = len(xyzA), len(xyzB)
         matrix = np.zeros((natA, natB))
@@ -831,8 +823,16 @@ class AtomicFeature(FeatureClass):
             dosum (bool, optional): sum the interaction terms for each atoms
             contact_only (bool, optional): consider only contact atoms
         """
-        if self.selection.type != ProteinSelectionType.CONTACT:
-            raise TypeError("coulomb interactions unsupported for selection type {}".format(self.selection.type))
+
+        contact_pairs = self.selection.contact_pairs
+        if len(contact_pairs) != 1:
+            raise ValueError("cannot compute interchain for the set of {} contact pairs".format(len(contact_pairs)))
+
+        chain1 = contact_pairs[0].chain1
+        chain2 = contact_pairs[0].chain2
+
+        contact_atoms_A = self.sqldb.get('rowID', chainID=chain1)
+        contact_atoms_B = self.sqldb.get('rowID', chainID=chain2)
 
         if self.verbose:
             print('-- Compute vdw energy interchain only')
@@ -840,38 +840,38 @@ class AtomicFeature(FeatureClass):
         if contact_only:
 
             xyzA = np.array(self.sqldb.get(
-                'x,y,z', rowID=self.contact_atoms_A))
+                'x,y,z', rowID=contact_atoms_A))
             xyzB = np.array(self.sqldb.get(
-                'x,y,z', rowID=self.contact_atoms_B))
+                'x,y,z', rowID=contact_atoms_B))
 
             vdwA = np.array(self.sqldb.get(
-                'eps,sig', rowID=self.contact_atoms_A))
+                'eps,sig', rowID=contact_atoms_A))
             vdwB = np.array(self.sqldb.get(
-                'eps,sig', rowID=self.contact_atoms_B))
+                'eps,sig', rowID=contact_atoms_B))
 
             epsA, sigA = vdwA[:, 0], vdwA[:, 1]
             epsB, sigB = vdwB[:, 0], vdwB[:, 1]
 
             atinfoA = self.sqldb.get(
-                self.atom_key, rowID=self.contact_atoms_A)
+                self.atom_key, rowID=contact_atoms_A)
             atinfoB = self.sqldb.get(
-                self.atom_key, rowID=self.contact_atoms_B)
+                self.atom_key, rowID=contact_atoms_B)
 
         else:
 
-            xyzA = np.array(self.sqldb.get('x,y,z', chainID=self.selection.chain1))
-            xyzB = np.array(self.sqldb.get('x,y,z', chainID=self.selection.chain2))
+            xyzA = np.array(self.sqldb.get('x,y,z', chainID=chain1))
+            xyzB = np.array(self.sqldb.get('x,y,z', chainID=chain2))
 
-            vdwA = np.array(self.sqldb.get('eps,sig', chainID=self.selection.chain1))
-            vdwB = np.array(self.sqldb.get('eps,sig', chainID=self.selection.chain2))
+            vdwA = np.array(self.sqldb.get('eps,sig', chainID=chain1))
+            vdwB = np.array(self.sqldb.get('eps,sig', chainID=chain2))
 
             epsA, sigA = vdwA[:, 0], vdwA[:, 1]
             epsB, sigB = vdwB[:, 0], vdwB[:, 1]
 
             atinfoA = self.sqldb.get(
-                self.atom_key, chainID=self.selection.chain1)
+                self.atom_key, chainID=chain1)
             atinfoB = self.sqldb.get(
-                self.atom_key, chainID=self.selection.chain2)
+                self.atom_key, chainID=chain2)
 
         natA, natB = len(xyzA), len(xyzB)
         matrix = np.zeros((natA, natB))
@@ -937,7 +937,8 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, selection):
         pdb_data (list(bytes)): pdb information
         featgrp (str): name of the group where to save xyz-val data
         featgrp_raw (str): name of the group where to save human readable data
-        selection (selection object): protein region of interest
+        chain1 (str): First chain ID
+        chain2 (str): Second chain ID
     """
     path = os.path.dirname(os.path.realpath(__file__))
     FF = path + '/forcefield/'

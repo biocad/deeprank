@@ -4,9 +4,9 @@ import warnings
 import numpy as np
 import pdb2sql
 
-from deeprank.selection import ProteinContactSelection, ProteinSelectionType
 from deeprank import config
 from deeprank.features import FeatureClass
+from deeprank.selection import sql_get, ContactPair, ProteinSelection
 
 ########################################################################
 #
@@ -17,7 +17,7 @@ from deeprank.features import FeatureClass
 
 class FullPSSM(FeatureClass):
 
-    def __init__(self, mol_name=None, pdb_file=None, selection=ProteinContactSelection('A', 'B'),
+    def __init__(self, mol_name=None, pdb_file=None, selection=ProteinSelection().add_contact_pair(ContactPair('A', 'B'))
                 pssm_path=None, pssm_format='new', out_type='pssmvalue'):
         """Compute all the PSSM data.
 
@@ -163,36 +163,32 @@ class FullPSSM(FeatureClass):
 
         self.pssm = dict(zip(self.pssm_res_id, self.pssm_data))
 
-    def get_feature_value(self, cutoff=5.5):
+    def get_feature_value(self):
         """get the feature value."""
 
-        sql = pdb2sql.interface(self.pdb_file)
+        with pdb2sql.interface(self.pdb_file) as sql:
 
-        # set achors for all residues and get their xyz
-        xyz_info, xyz = self.get_residue_center(sql)
+            # set achors for all residues and get their xyz
+            xyz_info, xyz = self.get_residue_center(sql)
 
-        xyz_dict = {}
-        for pos, info in zip(xyz, xyz_info):
-            xyz_dict[tuple(info)] = pos
+            xyz_dict = {}
+            for pos, info in zip(xyz, xyz_info):
+                xyz_dict[tuple(info)] = pos
 
-        # get interface contact residues
-        # ctc_res = {"A":[chain 1 residues], "B": [chain2 residues]}
-        ctc_res = sql.get_contact_residues(cutoff=cutoff, selection=self.selection)
-        sql._close()
+            # get interface contact residues
+            # ctc_res = {"A":[chain 1 residues], "B": [chain2 residues]}
 
-        ctc_res = [ctc_res[chain] for chain in self.selection.get_chains()]
+            ctc_res = sorted(set(sql_get(sql, self.selection, 'chainID, resSeq, resName')))
 
         # handle with small interface or no interface
         total_res = len(ctc_res)
         if total_res == 0:
             raise ValueError(
                 f"{self.mol_name}: No interface residue found with the "
-                f"cutoff {cutoff}Å."
                 f" Failed to calculate the features of FullPSSM/PSSM_IC.")
         elif total_res < 5:  # this is an empirical value
             warnings.warn(
                 f"{self.mol_name}: Only {total_res} interface residues found"
-                f" with cutoff {cutoff}Å. Be careful with"
                 f" using the features FullPSSM/PSSM_IC")
 
         # check if interface residues have pssm values
@@ -217,8 +213,7 @@ class FullPSSM(FeatureClass):
 
         # get feature values
         for res in ctc_res_with_pssm:
-            chain = self.selection.get_chain_number(res[0])
-
+            chain = self.selection.chains.index(res[0])
             key = tuple([chain] + xyz_dict[res])
             for name, value in zip(self.feature_names, self.pssm[res]):
                 # Make sure the feature_names and pssm[res] have
@@ -245,7 +240,7 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, selection, out_type='pss
         pdb_data (list(bytes)): pdb information
         featgrp (str): name of the group where to save xyz-val data
         featgrp_raw (str): name of the group where to save human readable data
-        selection (selection object): protein region of interest
+        selection )selection object): protein region of interest
         out_type (str): which feature to generate, 'pssmvalue' or 'pssmic'.
     """
 

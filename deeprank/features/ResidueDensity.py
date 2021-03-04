@@ -4,12 +4,12 @@ import pdb2sql
 
 from deeprank.features import FeatureClass
 from deeprank import config
-from deeprank.selection import ProteinSelectionType, ProteinContactSelection
+from deeprank.selection import ProteinSelection, ContactPair, sql_get
 
 
 class ResidueDensity(FeatureClass):
 
-    def __init__(self, pdb_data, selection=ProteinContactSelection('A', 'B')):
+    def __init__(self, pdb_data, selection=ProteinSelection().add_contact_pair(ContactPair('A', 'B')):
         """Compute the residue contacts between polar/apolar/charged residues.
 
         Args:
@@ -24,9 +24,7 @@ class ResidueDensity(FeatureClass):
 
         self.pdb_data = pdb_data
         self.sql = pdb2sql.interface(pdb_data)
-
-        self.chains_label = selection.get_chains()
-
+        self.chains_label = selection.chains
         self.selection = selection
 
         self.feature_data = {}
@@ -34,18 +32,14 @@ class ResidueDensity(FeatureClass):
 
         self.residue_types = config.AA_properties
 
-    def get(self, cutoff=5.5):
+    def get(self):
         """Get residue contacts.
 
         Raises:
             ValueError: No residue contact found.
         """
-        # res = {('chain1,resSeq,resName'): set(
-        #                               ('chain2,res1Seq,res1Name),
-        #                               ('chain2,res2Seq,res2Name'))}
-        res = self.sql.get_contact_residues(selection=self.selection,
-                                           cutoff=cutoff,
-                                           return_contact_pairs=True)
+
+        res = sql_get(self.sql, self.selection, "chainID, resSeq, resName")
 
         self.residue_contacts = {}
         for key, other_res in res.items():
@@ -127,7 +121,7 @@ class ResidueDensity(FeatureClass):
 
             # get the center
             _, xyz = self.get_residue_center(self.sql, res=key)
-            xyz_key = tuple([self.selection.get_chain_number(key[0])] + xyz[0])
+            xyz_key = tuple([{self.selection.chains.index(key[0])] + xyz[0])
 
             self.feature_data_xyz['RCD_total'][xyz_key] = [
                 res.density['total']]
@@ -165,7 +159,7 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, selection):
         pdb_data (list(bytes)): pdb information
         featgrp (str): name of the group where to save xyz-val data
         featgrp_raw (str): name of the group where to save human readable data
-        selection (selection object): protein region of interest
+        selection(selection object): protein region of interest
     """
 
     # create instance

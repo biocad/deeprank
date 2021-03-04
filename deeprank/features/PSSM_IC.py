@@ -1,6 +1,5 @@
 from deeprank.features.FullPSSM import FullPSSM
 from deeprank.features.FullPSSM import __compute_feature__ as func
-from deeprank.selection import ProteinSelectionType, ProteinContactSelection
 
 ########################################################################
 #
@@ -20,7 +19,7 @@ class PSSM_IC(FullPSSM):
 
 def __compute_feature__(pdb_data, featgrp, featgrp_raw, selection):
 
-    func(pdb_data, featgrp, featgrp_raw, selection,
+    func(pdb_data, featgrp, featgrp_raw, selection=selection,
         out_type='pssmic')
 
 ##########################################################################

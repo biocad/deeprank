@@ -3,7 +3,7 @@ import warnings
 import pdb2sql
 
 from deeprank.features import FeatureClass
-from deeprank.selection import ProteinContactSelection, ProteinSelectionType
+from deeprank.selection import ContactPair, ProteinSelection, sql_get
 
 try:
     import freesasa
@@ -15,7 +15,7 @@ except ImportError:
 
 class BSA(FeatureClass):
 
-    def __init__(self, pdb_data, selection=ProteinContactSelection('A', 'B')):
+    def __init__(self, pdb_data, selection=ProteinSelection().add_contact_pair(ContactPair('A', 'B')):
         """Compute the burried surface area feature.
 
         Freesasa is required for this feature.
@@ -25,7 +25,7 @@ class BSA(FeatureClass):
 
         Args:
             pdb_data (list(byte) or str): pdb data or pdb filename
-            selection (selection object, optional): protein region of interest
+            selection (selection object, optional): the protein region of interest
 
         Example:
             >>> bsa = BSA('1AK4.pdb')
@@ -36,8 +36,7 @@ class BSA(FeatureClass):
         self.pdb_data = pdb_data
         self.sql = pdb2sql.interface(pdb_data)
         self.selection = selection
-
-        self.chains_label = selection.get_chains()
+        self.chains_label = selection.chains
 
         self.feature_data = {}
         self.feature_data_xyz = {}
@@ -81,17 +80,19 @@ class BSA(FeatureClass):
 
         Raises:
             ValueError: No interface residues found.
-            TypeError: contact residue is not supported for protein selection type
         """
+
+        contact_pairs = self.selection.contact_pairs
+        if len(contact_pairs) < 1:
+            raise ValueError("cannot compute contact residues for a set of {} contact pairs".format(len(contact_pairs)))
 
         self.bsa_data = {}
         self.bsa_data_xyz = {}
 
-        if self.selection.type != ProteinSelectionType.CONTACT:
-            raise TypeError("contact residue is not supported for protein selection type {}".format(self.selection.type))
-
-        ctc_res = self.sql.get_contact_residues(cutoff=cutoff, chain1=self.selection.chain1, chain2=self.selection.chain2)
-        ctc_res = [ctc_res[chain] for chain in self.selection.get_chains()]
+        ctc_res = []
+        for pair in contact_pairs:
+            residues = self.sql.get_contact_residues(cutoff=cutoff, chain1=pair.chain1, chain2=pair.chain2)
+            ctc_res += residues[pair.chain1] + residues[pair.chain2]
 
         # handle with small interface or no interface
         total_res = len(ctc_res)
@@ -121,7 +122,7 @@ class BSA(FeatureClass):
             bsa = asa_unbound - asa_complex
 
             # define the xyz key: (chain,x,y,z)
-            chain = self.selection.get_chain_number(res[0])
+            chain = self.selection.chains.index(res[0])
 
             # get the center
             _, xyz = self.get_residue_center(self.sql, res=res)
@@ -149,7 +150,8 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, selection):
         pdb_data (list(bytes)): pdb information
         featgrp (str): name of the group where to save xyz-val data
         featgrp_raw (str): name of the group where to save human readable data
-        selection (selection object): the region of interest in the protein
+        chain1 (str): First chain ID
+        chain2 (str): Second chain ID
     """
 
     # create the BSA instance
