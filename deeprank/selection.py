@@ -38,6 +38,18 @@ class ProteinSelection:
     def subsets(self):
         return self._subsets
 
+    @property
+    def chains(self):
+        chains = set([])
+        for pair in self._contact_pairs:
+            chains.add(pair.chain1)
+            chains.add(pair.chain2)
+
+        for subset in self._subsets:
+            chains.add(subset.chain)
+
+        return sorted(chains)
+
 
 def sql_get(interface, selection, variable_name, **kwargs):
 
