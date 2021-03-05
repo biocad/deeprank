@@ -1,11 +1,5 @@
+import numpy
 from enum import Enum
-
-
-class ContactPair:
-    def __init__(self, chain1, chain2, distance=8.5):
-        self.chain1 = chain1
-        self.chain2 = chain2
-        self.distance = distance
 
 
 class Subset:
@@ -18,21 +12,19 @@ class Subset:
 
 
 class ProteinSelection:
-    def __init__(self):
+    def __init__(self, chains=[], contact_distance=8.5):
+        self._contact_distance = contact_distance
         self._subsets = set([])
-        self._contact_pairs = set([])
+
+        for chain in chains:
+            self._subsets.add(Subset(chain))
 
     def add_subset(self, subset):
         self._subsets.add(subset)
         return self
 
-    def add_contact_pair(self, pair):
-        self._contact_pairs.add(pair)
-        return self
-
-    @property
-    def contact_pairs(self):
-        return self._contact_pairs
+    def contact_distance(self):
+        return self._contact_distance
 
     @property
     def subsets(self):
@@ -51,11 +43,34 @@ class ProteinSelection:
         return sorted(chains)
 
 
+def sql_get_contacting_atom_pairs(interface, selection, **kwargs):
+    atoms = sql_get(interface, selection, 'rowID', **kwargs)
+
+    positions = {}
+    for atom, x, y, z in interface.get('rowID,x,y,z'):
+        positions[atom] = (x, y, z)
+
+    square_max_dist = numpy.square(selection.contact_distance)
+
+    contacting = set([])
+    for a1 in atoms:
+        for a2 in atoms:
+            if a1 != a2:
+                x1, y1, z1 = positions[a1]
+                x2, y2, z2 = positions[a2]
+                square_dist = numpy.square(x1 - x2) + numpy.square(y1 - y2) + numpy.square(z1 - z2)
+
+                if square_dist < square_max_dist:
+                    contacting.add({a1, a2})
+
+    return contacting
+
 def sql_get(interface, selection, variable_name, **kwargs):
 
     atoms = []
     for pair in selection.contact_pairs:
-        atoms.extend(interface.get_contact_atoms(chain1=pair.chain1, chain2=pair.chain2, cutoff=pair.distance))
+        atoms.extend(interface.get('rowID', chainID=pair.chain1))
+        atoms.extend(interface.get('rowID', chainID=pair.chain2))
 
     for subset in selection.subsets:
         selection_kwargs = {}

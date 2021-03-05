@@ -5,13 +5,13 @@ import numpy as np
 import pdb2sql
 
 from deeprank.features import FeatureClass
-from deeprank.selection import ContactPair, ProteinSelection, sql_get
+from deeprank.selection import ProteinSelection, sql_get
 
 
 class AtomicFeature(FeatureClass):
 
-    def __init__(self, pdbfile, selection=ProteinSelection().add_contact_pair(ContactPair('A', 'B')), param_charge=None,
-                param_vdw=None, patch_file=None, contact_cutoff=8.5,
+    def __init__(self, pdbfile, selection=ProteinSelection(chains=['A', 'B']), param_charge=None,
+                param_vdw=None, patch_file=None,
                 verbose=False):
         """Compute the Coulomb, van der Waals interaction and charges.
 
@@ -20,7 +20,6 @@ class AtomicFeature(FeatureClass):
             pdbfile (str): pdb file of the molecule
 
             selection (selection object): the protein region of interest
-            chain2 (str): Second chain ID, defaults to 'B'
 
             param_charge (str): file name of the force field file
                 containing the charges e.g. protein-allhdg5.4_new.top.
@@ -38,9 +37,6 @@ class AtomicFeature(FeatureClass):
                 the parameters e.g. patch.top.
                 The way we handle the patching is very manual and
                 should be made more automatic.
-
-            contact_cutoff (float): the maximum distance in Å
-                between 2 contact atoms.
 
             verbose (bool): print or not.
 
@@ -77,7 +73,6 @@ class AtomicFeature(FeatureClass):
         self.param_charge = param_charge
         self.param_vdw = param_vdw
         self.patch_file = patch_file
-        self.contact_cutoff = contact_cutoff
         self.verbose = verbose
 
         # a few constant
@@ -220,73 +215,7 @@ class AtomicFeature(FeatureClass):
 
             self.vdw_param[line[1]] = list(map(float, line[2:4]))
 
-    def get_contact_atoms(self):
-        """Get the contact atoms only select amino acids.
-
-        The ligands are not considered.
-        """
-        # TODO: replace this function with pdb2sql.get_contact_atoms
-        # but need to add a filter parameter to filter out ligand.
-
-        contact_pairs = self.selection.contact_pairs
-        if len(contact_pairs) != 1:
-            raise ValueError("cannot compute contact atoms for a selection of {} contact pairs".format(len(contact_pairs)))
-
-        chain1 = contact_pairs[0].chain1
-        chain2 = contact_pairs[0].chain2
-
-        # position of the chains
-        xyz1 = np.array(self.sqldb.get('x,y,z', chainID=chain1))
-        xyz2 = np.array(self.sqldb.get('x,y,z', chainID=chain2))
-
-        # rowID of the chains
-        index_a = self.sqldb.get('rowID', chainID=chain1)
-        index_b = self.sqldb.get('rowID', chainID=chain2)
-
-        # resName of the chains
-        resName1 = np.array(self.sqldb.get('resName', chainID=chain1))
-        resName2 = np.array(self.sqldb.get('resName', chainID=chain2))
-
-        # declare the contact atoms
-        self.contact_atoms_A = []
-        self.contact_atoms_B = []
-
-        # The contact atom pairs only contains pairs of atoms that are
-        # in contact
-        self.contact_pairs = {}
-
-        for i, x0 in enumerate(xyz1):
-
-            # compute the contact atoms
-            contacts = np.where(
-                np.sqrt(np.sum((xyz2 - x0)**2, 1)) < self.contact_cutoff)[0]
-
-            # if we have contact atoms and resA is not a ligand
-            if (len(contacts) > 0) and (resName1[i] in self.valid_resnames):
-
-                # add i to the list
-                # add the index of b if its resname is not a ligand
-                self.contact_atoms_A += [index_a[i]]
-                self.contact_atoms_B += [
-                    index_b[k] for k in contacts
-                    if resName2[k] in self.valid_resnames
-                ]
-
-                # add the contact pairs to the list
-                self.contact_pairs[index_a[i]] = [
-                    index_b[k] for k in contacts
-                    if resName2[k] in self.valid_resnames
-                ]
-
-        # create a set of unique indexes
-        self.contact_atoms_A = sorted(set(self.contact_atoms_A))
-        self.contact_atoms_B = sorted(set(self.contact_atoms_B))
-
-        # if no interface atoms were found
-        if len(self.contact_atoms_A) == 0:
-            raise ValueError("No contact atoms detected in AtomicFeature")
-
-    def _extend_contact_to_residue(self):
+    def _extend_selection_to_residue(self):
         """Extend the contact atoms to entire residue where one atom is
         contacting."""
 
@@ -516,7 +445,7 @@ class AtomicFeature(FeatureClass):
 
         # entire residue or not
         if extend_contact_to_residue:
-            index_atoms = self._extend_contact_to_residue()
+            index_atoms = self._extend_selection_to_residue()
         else:
             index_atoms = self.selection_atoms
 
@@ -553,18 +482,12 @@ class AtomicFeature(FeatureClass):
             save_interactions (bool, optional): save the itneractions to file.
         """
 
-        contact_pairs = self.selection.contact_pairs
-        if len(contact_pairs) != 1:
-            raise ValueError("cannot evaluate pair interaction for a selection of {} contact pairs".format(len(contact_pairs)))
-
-        chain1 = contact_pairs[0].chain1
-        chain2 = contact_pairs[0].chain2
-
         if self.verbose:
             print('-- Compute interaction energy for contact pairs only')
 
-        # extract information from the pdb2sq
-        xyz = np.array(self.sqldb.get('x,y,z'))
+        # extract information from the pdb2sql
+        contacting_pairs = sql_get_contacting_atom_pairs(self.sqldb, self.selection)
+        xyz = self.sqldb.get('x,y,z')
         atinfo = self.sqldb.get(self.atom_key)
 
         charge = np.array(self.sqldb.get('CHARGE'))
@@ -582,12 +505,6 @@ class AtomicFeature(FeatureClass):
         electro_data_xyz = {}
         vdw_data_xyz = {}
 
-        # define the matrices
-        natA, natB = len(self.sqldb.get('x', chainID=chain1)), len(
-            self.sqldb.get('x', chainID=chain2))
-        matrix_elec = np.zeros((natA, natB))
-        matrix_vdw = np.zeros((natA, natB))
-
         # handle the export of the interaction breakdown
         _save_ = False
         if save_interactions:
@@ -604,69 +521,57 @@ class AtomicFeature(FeatureClass):
         # total energy terms
         ec_tot, evdw_tot = 0, 0
 
-        # loop over the chain A
-        for iA, indsB in self.contact_pairs.items():
+        # loop over the contacts
+        for atomA, atomB in contacting_pairs:
 
             # coulomb terms
-            r = np.sqrt(np.sum((xyz[indsB, :] - xyz[iA, :])**2, 1))
-            r[r == 0] = 3.0
-            q1q2 = charge[iA] * charge[indsB]
-            ec = q1q2 * self.c / (self.eps0 * r) * \
-                (1 - (r / self.contact_cutoff)**2) ** 2
+            r = np.sqrt(np.sum((xyz[atomB] - xyz[atomA])**2, 1))
+            if r == 0:
+                r = 3.0
+
+            q1q2 = charge[atomA] * charge[atomB]
+            ec = q1q2 * self.c / (self.eps0 * r) * (1 - (r / self.selection.contact_distance)**2) ** 2
 
             # coulomb terms
-            sigma_avg = 0.5 * (sig[iA] + sig[indsB])
-            eps_avg = np.sqrt(eps[iA] * eps[indsB])
+            sigma_avg = 0.5 * (sig[atomA] + sig[atomB])
+            eps_avg = np.sqrt(eps[atomA] * eps[atomB])
 
             # normal LJ potential
             evdw = 4.0 * eps_avg * \
                 ((sigma_avg / r)**12 - (sigma_avg / r)**6) * self._prefactor_vdw(r)
 
             # total energy terms
-            ec_tot += np.sum(ec)
-            evdw_tot += np.sum(evdw)
+            ec_tot += ec
+            evdw_tot += evdw
 
-            # atinfo
-            keyA = tuple(atinfo[iA])
+            for atom in [atomA, atomB]:
 
-            # store in matrix form so that
-            # we don't have to recalculate for B
-            # here assumes that the chainID order is A,B...
-            # otherwise rowID will be different with the matrix index
-            indb_matrix = [i - natA for i in indsB]
-            matrix_elec[iA, indb_matrix] = ec
-            matrix_vdw[iA, indb_matrix] = evdw
+                # store in the dicts
+                atom_key = tuple(atinfo[atom])
+                electro_data[atom_key] = electro_data.get(atom_key, 0) + ec
+                vdw_data[atom_key] = vdw_data.get(atom_key, 0) + evdw
 
-            # store in the dicts
-            electro_data[keyA] = [np.sum(ec)]
-            vdw_data[keyA] = [np.sum(evdw)]
+                # store in the xyz dict
+                xyz_key = tuple([atom] + xyz[atom])
+                electro_data_xyz[xyz_key] = electro_data_xyz.get(xyz_key, 0) + ec
+                vdw_data_xyz[xyz_key] = vdw_data_xyz.get(xyz_key, 0) + evdw
 
-            # store in the xyz dict
-            key = tuple([0] + xyz[iA, :].tolist())
-            electro_data_xyz[key] = [np.sum(ec)]
-            vdw_data_xyz[key] = [np.sum(evdw)]
-
-            # print the result
-            if _save_ or print_interactions:
-
-                for iB, indexB in enumerate(indsB):
+                # print the result
+                if _save_ or print_interactions:
 
                     line = ''
-                    keyB = tuple(atinfo[indexB])
 
-                    line += '{:<3s}'.format(keyA[0])
-                    line += '\t{:>1d}'.format(keyA[1])
-                    line += '\t{:>4s}'.format(keyA[2])
-                    line += '\t{:^4s}'.format(keyA[3])
+                    for atom in [atomA, atomB]:
+                        atom_key = tuple(atinfo[atom])
 
-                    line += '\t{:<3s}'.format(keyB[0])
-                    line += '\t{:>1d}'.format(keyB[1])
-                    line += '\t{:>4s}'.format(keyB[2])
-                    line += '\t{:^4s}'.format(keyB[3])
+                        line += '{:<3s}'.format(atom_key[0])
+                        line += '\t{:>1d}'.format(atom_key[1])
+                        line += '\t{:>4s}'.format(atom_key[2])
+                        line += '\t{:^4s}'.format(atom_key[3])
 
-                    line += '\t{: 6.3f}'.format(r[iB])
-                    line += '\t{: f}'.format(ec[iB])
-                    line += '\t{: e}'.format(evdw[iB])
+                    line += '\t{: 6.3f}'.format(r)
+                    line += '\t{: f}'.format(ec)
+                    line += '\t{: e}'.format(evdw)
 
                     # print and/or save the interactions
                     if print_interactions:
@@ -691,25 +596,6 @@ class AtomicFeature(FeatureClass):
             f.close()
             print(f'AtomicFeature coulomb and vdw exported to file {fname}')
 
-        # loop over the B atoms
-        for indexB in self.contact_atoms_B:
-
-            # atinfo
-            keyB = tuple(atinfo[indexB])
-
-            # extract the values from the matrix
-            ec = matrix_elec[:, indexB - natA]
-            evdw = matrix_vdw[:, indexB - natA]
-
-            # store in the dict
-            electro_data[keyB] = [np.sum(ec)]
-            vdw_data[keyB] = [np.sum(evdw)]
-
-            # store the xyz dict
-            key = tuple([1] + xyz[indexB, :].tolist())
-            electro_data_xyz[key] = [np.sum(ec)]
-            vdw_data_xyz[key] = [np.sum(evdw)]
-
         # add the electrosatic feature
         self.feature_data['coulomb'] = electro_data
         self.feature_data_xyz['coulomb'] = electro_data_xyz
@@ -718,198 +604,6 @@ class AtomicFeature(FeatureClass):
         self.feature_data['vdwaals'] = vdw_data
         self.feature_data_xyz['vdwaals'] = vdw_data_xyz
 
-    ####################################################################
-    #
-    #   ELECTROSTATIC
-    #
-    ####################################################################
-
-    def compute_coulomb_interchain_only(self, dosum=True, contact_only=False):
-        """Compute the coulomb interactions between the chains only.
-
-        Args:
-            dosum (bool, optional): sum the interaction terms for each atoms
-            contact_only (bool, optional): consider only contact atoms
-        """
-
-        contact_pairs = self.selection.contact_pairs
-        if len(contact_pairs) != 1:
-            raise ValueError("cannot compute interchain for the set of {} contact pairs".format(len(contact_pairs)))
-
-        if self.verbose:
-            print('-- Compute coulomb energy interchain only')
-
-        chain1 = contact_pairs[0].chain1
-        chain2 = contact_pairs[0].chain2
-
-        contact_atoms_A = self.sqldb.get('rowID', chainID=chain1)
-        contact_atoms_B = self.sqldb.get('rowID', chainID=chain2)
-
-        if contact_only:
-
-            xyzA = np.array(self.sqldb.get(
-                'x,y,z', rowID=contact_atoms_A))
-            xyzB = np.array(self.sqldb.get(
-                'x,y,z', rowID=contact_atoms_B))
-
-            chargeA = np.array(self.sqldb.get(
-                'CHARGE', rowID=contact_atoms_A))
-            chargeB = np.array(self.sqldb.get(
-                'CHARGE', rowID=contact_atoms_B))
-
-            atinfoA = self.sqldb.get(
-                self.atom_key, rowID=contact_atoms_A)
-            atinfoB = self.sqldb.get(
-                self.atom_key, rowID=contact_atoms_B)
-
-        else:
-
-            xyzA = np.array(self.sqldb.get('x,y,z', chainID=chain1))
-            xyzB = np.array(self.sqldb.get('x,y,z', chainID=chain2))
-
-            chargeA = np.array(self.sqldb.get('CHARGE', chainID=chain1))
-            chargeB = np.array(self.sqldb.get('CHARGE', chainID=chain2))
-
-            atinfoA = self.sqldb.get(
-                self.atom_key, chainID=chain1)
-            atinfoB = self.sqldb.get(
-                self.atom_key, chainID=chain2)
-
-        natA, natB = len(xyzA), len(xyzB)
-        matrix = np.zeros((natA, natB))
-
-        electro_data = {}
-
-        for iat in range(natA):
-
-            # coulomb terms
-            r = np.sqrt(np.sum((xyzB - xyzA[iat, :])**2, 1))
-            r[r == 0] = 3.0
-            q1q2 = chargeA[iat] * chargeB
-            value = q1q2 / r
-
-            # store amd symmtrized these values
-            matrix[iat, :] = value
-
-            # atinfo
-            key = tuple(atinfoA[iat])
-
-            # store
-            if dosum:
-                value = [np.sum(value)]
-            electro_data[key] = value
-
-        for iat in range(natB):
-
-            # atinfo
-            key = tuple(atinfoB[iat])
-
-            # store
-            value = matrix[:, iat]
-            if dosum:
-                value = [np.sum(value)]
-            electro_data[key] = value
-
-    ####################################################################
-    #
-    #   VAN DER WAALS
-    #
-    ####################################################################
-
-    def compute_vdw_interchain_only(self, dosum=True, contact_only=False):
-        """Compute the vdw interactions between the chains only.
-
-        Args:
-            dosum (bool, optional): sum the interaction terms for each atoms
-            contact_only (bool, optional): consider only contact atoms
-        """
-
-        contact_pairs = self.selection.contact_pairs
-        if len(contact_pairs) != 1:
-            raise ValueError("cannot compute interchain for the set of {} contact pairs".format(len(contact_pairs)))
-
-        chain1 = contact_pairs[0].chain1
-        chain2 = contact_pairs[0].chain2
-
-        contact_atoms_A = self.sqldb.get('rowID', chainID=chain1)
-        contact_atoms_B = self.sqldb.get('rowID', chainID=chain2)
-
-        if self.verbose:
-            print('-- Compute vdw energy interchain only')
-
-        if contact_only:
-
-            xyzA = np.array(self.sqldb.get(
-                'x,y,z', rowID=contact_atoms_A))
-            xyzB = np.array(self.sqldb.get(
-                'x,y,z', rowID=contact_atoms_B))
-
-            vdwA = np.array(self.sqldb.get(
-                'eps,sig', rowID=contact_atoms_A))
-            vdwB = np.array(self.sqldb.get(
-                'eps,sig', rowID=contact_atoms_B))
-
-            epsA, sigA = vdwA[:, 0], vdwA[:, 1]
-            epsB, sigB = vdwB[:, 0], vdwB[:, 1]
-
-            atinfoA = self.sqldb.get(
-                self.atom_key, rowID=contact_atoms_A)
-            atinfoB = self.sqldb.get(
-                self.atom_key, rowID=contact_atoms_B)
-
-        else:
-
-            xyzA = np.array(self.sqldb.get('x,y,z', chainID=chain1))
-            xyzB = np.array(self.sqldb.get('x,y,z', chainID=chain2))
-
-            vdwA = np.array(self.sqldb.get('eps,sig', chainID=chain1))
-            vdwB = np.array(self.sqldb.get('eps,sig', chainID=chain2))
-
-            epsA, sigA = vdwA[:, 0], vdwA[:, 1]
-            epsB, sigB = vdwB[:, 0], vdwB[:, 1]
-
-            atinfoA = self.sqldb.get(
-                self.atom_key, chainID=chain1)
-            atinfoB = self.sqldb.get(
-                self.atom_key, chainID=chain2)
-
-        natA, natB = len(xyzA), len(xyzB)
-        matrix = np.zeros((natA, natB))
-
-        vdw_data = {}
-
-        for iat in range(natA):
-
-            # vdW terms
-            r = np.sqrt(np.sum((xyzB - xyzA[iat, :])**2, 1))
-            r[r == 0] = 3.0
-            sigma = 0.5 * (sigA[iat] + sigB)
-            eps = np.sqrt(epsA[iat] * epsB)
-
-            # normal LJ potential
-            value = 4 * eps * ((sigma / r)**12 - (sigma / r)**6)
-
-            # store these values
-            matrix[iat, :] = value
-
-            # atinfo
-            key = tuple(atinfoA[iat])
-
-            # store
-            if dosum:
-                value = [np.sum(value)]
-            vdw_data[key] = value
-
-        for iat in range(natB):
-
-            # atinfo
-            key = tuple(atinfoB[iat])
-
-            # store
-            value = matrix[:, iat]
-            if dosum:
-                value = [np.sum(value)]
-            vdw_data[key] = value
 
     @staticmethod
     def _prefactor_vdw(r):

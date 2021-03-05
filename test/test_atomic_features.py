@@ -94,14 +94,6 @@ class TestAtomicFeature(unittest.TestCase):
         if not np.allclose(Etest, Eref):
             raise AssertionError()
 
-        # make sure that the other properties are not crashing
-        atfeat.compute_coulomb_interchain_only(contact_only=True)
-        atfeat.compute_coulomb_interchain_only(contact_only=False)
-
-        # make sure that the other properties are not crashing
-        atfeat.compute_vdw_interchain_only(contact_only=True)
-        atfeat.compute_vdw_interchain_only(contact_only=False)
-
         # close the db
         atfeat.sqldb._close()
 
