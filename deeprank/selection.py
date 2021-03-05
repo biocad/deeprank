@@ -3,10 +3,10 @@ import pdb2sql
 
 
 class ProteinSelection:
-    def __init__(self, atoms, center_position):
+    def __init__(self, atoms, center_position, contact_distance):
         self._atoms = atoms
-
         self._center_position = center_position
+        self._contact_distance = contact_distance
 
     @property
     def center_position(self):
@@ -15,6 +15,10 @@ class ProteinSelection:
     @property
     def atoms(self):
         return self._atoms
+
+    @property
+    def contact_distance(self):
+        return self._contact_distance
 
 
 def get_squared_distance(p1, p2):
@@ -50,7 +54,7 @@ def select_interface(pdb_path, chain1, chain2, atom_distance=8.5,
             atoms.extend(vs)
         positions = sqldb.get('x,y,z', rowID=atoms)
 
-        return ProteinSelection(atoms, get_mean_position(positions))
+        return ProteinSelection(atoms, get_mean_position(positions), atom_distance)
     finally:
         sqldb._close()
 
@@ -68,6 +72,6 @@ def select_residue_environment(pdb_path, chain, residue_number, distance_around_
 
         nearby_atoms = [atom[0] for atom in atoms_with_positions if get_squared_distance(atom[1: 4], center) < squared_max_distance]
 
-        return ProteinSelection(nearby_atoms, center)
+        return ProteinSelection(nearby_atoms, center, distance_around_residue)
     finally:
         sqldb._close()
