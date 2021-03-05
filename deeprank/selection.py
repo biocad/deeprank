@@ -1,88 +1,73 @@
 import numpy
-from enum import Enum
-
-
-class Subset:
-    def __init__(self, chain_id, residue_number=None, atom_name=None, element=None):
-        # None means: don't care
-        self.chain = chain_id
-        self.number = residue_number
-        self.atom = atom_name
-        self.element = element
+import pdb2sql
 
 
 class ProteinSelection:
-    def __init__(self, chains=[], contact_distance=8.5):
-        self._contact_distance = contact_distance
-        self._subsets = set([])
+    def __init__(self, atoms, center_position):
+        self._atoms = atoms
 
-        for chain in chains:
-            self._subsets.add(Subset(chain))
-
-    def add_subset(self, subset):
-        self._subsets.add(subset)
-        return self
-
-    def contact_distance(self):
-        return self._contact_distance
+        self._center_position = center_position
 
     @property
-    def subsets(self):
-        return self._subsets
+    def center_position(self):
+        return self._center_position
 
     @property
-    def chains(self):
-        chains = set([])
-        for pair in self._contact_pairs:
-            chains.add(pair.chain1)
-            chains.add(pair.chain2)
-
-        for subset in self._subsets:
-            chains.add(subset.chain)
-
-        return sorted(chains)
+    def atoms(self):
+        return self._atoms
 
 
-def sql_get_contacting_atom_pairs(interface, selection, **kwargs):
-    atoms = sql_get(interface, selection, 'rowID', **kwargs)
+def get_squared_distance(p1, p2):
+    return sum([numpy.square(p1[i] - p2[i]) for i in range(3)])
 
-    positions = {}
-    for atom, x, y, z in interface.get('rowID,x,y,z'):
-        positions[atom] = (x, y, z)
 
-    square_max_dist = numpy.square(selection.contact_distance)
+def get_mean_position(ps):
+    s = [0] * 3
+    n = len(ps)
+    for p in ps:
+        for i in range(3):
+            s[i] += p[i]
 
-    contacting = set([])
-    for a1 in atoms:
-        for a2 in atoms:
-            if a1 != a2:
-                x1, y1, z1 = positions[a1]
-                x2, y2, z2 = positions[a2]
-                square_dist = numpy.square(x1 - x2) + numpy.square(y1 - y2) + numpy.square(z1 - z2)
+    return [s[i] / n for i in range(3)]
 
-                if square_dist < square_max_dist:
-                    contacting.add({a1, a2})
 
-    return contacting
+def select_interface(pdb_path, chain1, chain2, atom_distance=8.5,
+                     extend_to_residue=False, only_backbone=False, exclude_hydrogen=False):
+    if chain1 == chain2:
+        raise ValueError("cannot select an interface on twice the same chain")
 
-def sql_get(interface, selection, variable_name, **kwargs):
+    sqldb = pdb2sql.interface(pdb_path)
 
-    atoms = []
-    for pair in selection.contact_pairs:
-        atoms.extend(interface.get('rowID', chainID=pair.chain1))
-        atoms.extend(interface.get('rowID', chainID=pair.chain2))
+    try:
+        atoms_per_chain = sqldb.get_contact_atoms(cutoff=atom_distance, chain1=chain1, chain2=chain2,
+                                                  extend_to_residue=extend_to_residue,
+                                                  only_backbone_atoms=only_backbone,
+                                                  excludeH=exclude_hydrogen,
+                                                  return_contact_pairs=False)
 
-    for subset in selection.subsets:
-        selection_kwargs = {}
-        if subset.chain is not None:
-            selection_kwargs['chainID'] = subset.chain
-        if subset.number is not None:
-            selection_kwargs['resSeq'] = subset.number
-        if subset.atom is not None:
-            selection_kwargs['name'] = subset.atom
-        if subset.element is not None:
-            selection_kwargs['element'] = subset.element
+        atoms = []
+        for vs in atoms_per_chain.values():
+            atoms.extend(vs)
+        positions = sqldb.get('x,y,z', rowID=atoms)
 
-        atoms.extend(interface.get('rowID', **selection_kwargs))
+        return ProteinSelection(atoms, get_mean_position(positions))
+    finally:
+        sqldb._close()
 
-    return interface.get(variable_name, rowID=atoms, **kwargs)
+
+def select_residue_environment(pdb_path, chain, residue_number, distance_around_residue=5.5):
+
+    squared_max_distance = numpy.square(distance_around_residue)
+
+    sqldb = pdb2sql.interface(pdb_path)
+
+    try:
+        center = sqldb.get('x,y,z', chainID=chain, resSeq=residue_number, name='CA')[0]
+
+        atoms_with_positions = sqldb.get('rowID,x,y,z')
+
+        nearby_atoms = [atom[0] for atom in atoms_with_positions if get_squared_distance(atom[1: 4], center) < squared_max_distance]
+
+        return ProteinSelection(nearby_atoms, center)
+    finally:
+        sqldb._close()
