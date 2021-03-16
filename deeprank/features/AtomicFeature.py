@@ -1,17 +1,21 @@
 import os
+import logging
 import warnings
 
 import numpy as np
 import pdb2sql
 
 from deeprank.features import FeatureClass
-from deeprank.selection import ProteinSelection, sql_get
+
+
+_log = logging.getLogger(__name__)
 
 
 class AtomicFeature(FeatureClass):
 
-    def __init__(self, pdbfile, selection=ProteinSelection(chains=['A', 'B']), param_charge=None,
+    def __init__(self, pdbfile, selection, param_charge=None,
                 param_vdw=None, patch_file=None,
+                contact_cutoff=8.5,
                 verbose=False):
         """Compute the Coulomb, van der Waals interaction and charges.
 
@@ -59,7 +63,7 @@ class AtomicFeature(FeatureClass):
             >>> atfeat.assign_parameters()
             >>>
             >>> # only compute the pair interactions here
-            >>> atfeat.evaluate_pair_interaction(save_interactions=test_name)
+            >>> atfeat.evaluate_pair_interaction()
             >>>
             >>> # close the db
             >>> atfeat.sqldb._close()
@@ -73,6 +77,7 @@ class AtomicFeature(FeatureClass):
         self.param_charge = param_charge
         self.param_vdw = param_vdw
         self.patch_file = patch_file
+        self.contact_cutoff = contact_cutoff
         self.verbose = verbose
 
         # a few constant
@@ -94,10 +99,6 @@ class AtomicFeature(FeatureClass):
 
         # read the vdw param file
         self.read_vdw_file()
-
-        # get the atoms
-        self.selection_atoms = sql_get(self.sqldb, self.selection, "rowID")
-        self.selection_chains = sorted(set(sql_get(self.sqldb, self.selection, "chainID")))
 
     ####################################################################
     #
@@ -149,6 +150,7 @@ class AtomicFeature(FeatureClass):
             self.at_name_type_convertor[(res, atname)] = attype
 
         self.valid_resnames = list(set(resnames))
+        _log.debug("{} charges and {} valid resnames parsed".format(len(self.charge), len(self.valid_resnames)))
 
     def read_patch(self):
         """Read the patchfile.
@@ -220,7 +222,7 @@ class AtomicFeature(FeatureClass):
         contacting."""
 
         # extract the data
-        data = self.sqldb.get(self.residue_key, self.selection_atoms)
+        data = self.sqldb.get(self.residue_key, self.selection.atoms)
 
         # extract uniques
         res = list(set(data))
@@ -447,7 +449,9 @@ class AtomicFeature(FeatureClass):
         if extend_contact_to_residue:
             index_atoms = self._extend_selection_to_residue()
         else:
-            index_atoms = self.selection_atoms
+            index_atoms = self.selection.atoms
+
+        chains = sorted(set(self.sqldb.get('chainID')))
 
         # loop over the chain A
         for i in atoms:
@@ -459,8 +463,8 @@ class AtomicFeature(FeatureClass):
             charge_data[key] = [charge[i]]
 
             # xyz format
-            chain_dict = [self.selection_chains.index(key[0])]
-            key = tuple(chain_dict + xyz[i, :].tolist())
+            chain_list = [chains.index(key[0])]
+            key = tuple(chain_list + xyz[i, :].tolist())
             charge_data_xyz[key] = [charge[i]]
 
         # add the electrosatic feature
@@ -473,21 +477,15 @@ class AtomicFeature(FeatureClass):
     #
     ####################################################################
 
-    def evaluate_pair_interaction(self, print_interactions=False,
-                                  save_interactions=False):
-        """Evalaute the pair interactions (coulomb and vdw).
-
-        Args:
-            print_interactions (bool, optional): print data to screen
-            save_interactions (bool, optional): save the itneractions to file.
-        """
+    def evaluate_pair_interaction(self):
+        """Evalaute the pair interactions (coulomb and vdw)."""
 
         if self.verbose:
             print('-- Compute interaction energy for contact pairs only')
 
         # extract information from the pdb2sql
-        contacting_pairs = sql_get_contacting_atom_pairs(self.sqldb, self.selection)
-        xyz = self.sqldb.get('x,y,z')
+        atom_pairs = self.selection.contact_atom_pairs
+        xyz = {r[0]: r[1:4] for r in self.sqldb.get('rowID, x,y,z')}
         atinfo = self.sqldb.get(self.atom_key)
 
         charge = np.array(self.sqldb.get('CHARGE'))
@@ -505,40 +503,44 @@ class AtomicFeature(FeatureClass):
         electro_data_xyz = {}
         vdw_data_xyz = {}
 
-        # handle the export of the interaction breakdown
-        _save_ = False
-        if save_interactions:
-            if save_interactions:
-                save_interactions = './'
-            if os.path.isdir(save_interactions):
-                fname = os.path.join(save_interactions,
-                                     'atomic_pair_interaction.dat')
-            else:
-                fname = save_interactions
-            f = open(fname, 'w')
-            _save_ = True
-
         # total energy terms
         ec_tot, evdw_tot = 0, 0
 
         # loop over the contacts
-        for atomA, atomB in contacting_pairs:
+        for atomA, atomB in atom_pairs:
+            resnameA = self.sqldb.get('resName', rowID=atomA)[0]
+            resnameB = self.sqldb.get('resName', rowID=atomB)[0]
+            if resnameA not in self.valid_resnames:
+                _log.warn("{} is not considered a valid resname".format(resnameA))
+                continue
+
+            if resnameB not in self.valid_resnames:
+                _log.warn("{} is not considered a valid resname".format(resnameB))
+                continue
+
+            resA = self.sqldb.get('resSeq', rowID=atomA)
+            resB = self.sqldb.get('resSeq', rowID=atomB)
+
+            if resA == resB:
+                continue
 
             # coulomb terms
-            r = np.sqrt(np.sum((xyz[atomB] - xyz[atomA])**2, 1))
+            r = np.sqrt(np.sum([np.square(xyz[atomB][i] - xyz[atomA][i]) for i in range(3)]))
             if r == 0:
                 r = 3.0
 
+            if r > self.contact_cutoff:
+                continue
+
             q1q2 = charge[atomA] * charge[atomB]
-            ec = q1q2 * self.c / (self.eps0 * r) * (1 - (r / self.selection.contact_distance)**2) ** 2
+            ec = q1q2 * self.c / (self.eps0 * r) * np.square(1 - np.square(r / self.contact_cutoff))
 
             # coulomb terms
             sigma_avg = 0.5 * (sig[atomA] + sig[atomB])
             eps_avg = np.sqrt(eps[atomA] * eps[atomB])
 
             # normal LJ potential
-            evdw = 4.0 * eps_avg * \
-                ((sigma_avg / r)**12 - (sigma_avg / r)**6) * self._prefactor_vdw(r)
+            evdw = 4.0 * eps_avg * (pow(sigma_avg / r, 12) - pow(sigma_avg / r, 6)) * self._prefactor_vdw(r)
 
             # total energy terms
             ec_tot += ec
@@ -556,45 +558,12 @@ class AtomicFeature(FeatureClass):
                 electro_data_xyz[xyz_key] = electro_data_xyz.get(xyz_key, 0) + ec
                 vdw_data_xyz[xyz_key] = vdw_data_xyz.get(xyz_key, 0) + evdw
 
-                # print the result
-                if _save_ or print_interactions:
-
-                    line = ''
-
-                    for atom in [atomA, atomB]:
-                        atom_key = tuple(atinfo[atom])
-
-                        line += '{:<3s}'.format(atom_key[0])
-                        line += '\t{:>1d}'.format(atom_key[1])
-                        line += '\t{:>4s}'.format(atom_key[2])
-                        line += '\t{:^4s}'.format(atom_key[3])
-
-                    line += '\t{: 6.3f}'.format(r)
-                    line += '\t{: f}'.format(ec)
-                    line += '\t{: e}'.format(evdw)
-
-                    # print and/or save the interactions
-                    if print_interactions:
-                        print(line)
-
-                    if _save_:
-                        line += '\n'
-                        f.write(line)
+            _log.debug("interaction between {} and {}: r={}, ec={}, evdw={}"
+                       .format(tuple(atinfo[atomA]), tuple(atinfo[atomB]), r, ec, evdw))
 
         # print the total interactions
-        if print_interactions or _save_:
-            line = '\n\n'
-            line += 'Total Evdw  = {:> 12.8f}\n'.format(evdw_tot)
-            line += 'Total Eelec = {:> 12.8f}\n'.format(ec_tot)
-            if print_interactions:
-                print(line)
-            if _save_:
-                f.write(line)
-
-        # close export file
-        if _save_:
-            f.close()
-            print(f'AtomicFeature coulomb and vdw exported to file {fname}')
+        _log.debug('Total Evdw  = {:> 12.8f}\n'.format(evdw_tot))
+        _log.debug('Total Eelec = {:> 12.8f}\n'.format(ec_tot))
 
         # add the electrosatic feature
         self.feature_data['coulomb'] = electro_data
@@ -604,17 +573,23 @@ class AtomicFeature(FeatureClass):
         self.feature_data['vdwaals'] = vdw_data
         self.feature_data_xyz['vdwaals'] = vdw_data_xyz
 
+        return ec_tot, evdw_tot
+
 
     @staticmethod
     def _prefactor_vdw(r):
         """prefactor for vdw interactions."""
 
         r_off, r_on = 8.5, 6.5
-        r2 = r**2
-        pref = (r_off**2 - r2)**2 * (r_off**2 - r2 - 3 *
-                                     (r_on**2 - r2)) / (r_off**2 - r_on**2)**3
-        pref[r > r_off] = 0.
-        pref[r < r_on] = 1.0
+        squared_r = np.square(r)
+        pref = np.square(np.square(r_off) - squared_r) * (np.square(r_off) - squared_r - 3 *
+                                     (np.square(r_on) - squared_r)) / np.power(np.square(r_off) - np.square(r_on), 3)
+        if r > r_off:
+            pref = 0
+
+        if r < r_on:
+            pref = 1
+
         return pref
 
 
@@ -631,8 +606,7 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, selection):
         pdb_data (list(bytes)): pdb information
         featgrp (str): name of the group where to save xyz-val data
         featgrp_raw (str): name of the group where to save human readable data
-        chain1 (str): First chain ID
-        chain2 (str): Second chain ID
+        selection(selection object): protein region of interest
     """
     path = os.path.dirname(os.path.realpath(__file__))
     FF = path + '/forcefield/'
@@ -646,7 +620,7 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, selection):
     atfeat.assign_parameters()
 
     # only compute the pair interactions here
-    atfeat.evaluate_pair_interaction(print_interactions=False)
+    atfeat.evaluate_pair_interaction()
 
     # compute the charges
     # here we extand the contact atoms to
