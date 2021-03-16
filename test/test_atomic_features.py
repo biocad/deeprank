@@ -5,7 +5,7 @@ from nose.tools import eq_
 import numpy as np
 import pkg_resources
 
-from deeprank.selection import select_interface
+from deeprank.selection import InterfaceSelection
 from deeprank.features import AtomicFeature
 
 
@@ -86,10 +86,10 @@ class TestAtomicFeature(unittest.TestCase):
             'deeprank.features', '') + '/forcefield/'
 
         # declare the feature calculator instance
-        atfeat = AtomicFeature(pdb, select_interface(pdb, 'A', 'B', max_atom_distance=8.5),
+        atfeat = AtomicFeature(pdb, InterfaceSelection('A', 'B'),
                                param_charge=FF + 'protein-allhdg5-4_new.top',
                                param_vdw=FF + 'protein-allhdg5-4_new.param',
-                               patch_file=FF + 'patch.top')
+                               patch_file=FF + 'patch.top', contact_cutoff=8.5)
         # assign parameters
         atfeat.assign_parameters()
 

@@ -4,12 +4,12 @@ import pdb2sql
 
 from deeprank.features import FeatureClass
 from deeprank import config
-from deeprank.selection import ProteinSelection, ContactPair, sql_get
+from deeprank.selection import InterfaceSelection, get_chains, get_contact_residues
 
 
 class ResidueDensity(FeatureClass):
 
-    def __init__(self, pdb_data, selection=ProteinSelection().add_contact_pair(ContactPair('A', 'B')):
+    def __init__(self, pdb_data, selection=InterfaceSelection('A', 'B')):
         """Compute the residue contacts between polar/apolar/charged residues.
 
         Args:
@@ -24,7 +24,7 @@ class ResidueDensity(FeatureClass):
 
         self.pdb_data = pdb_data
         self.sql = pdb2sql.interface(pdb_data)
-        self.chains_label = selection.chains
+        self.chains_label = get_chains(self.sql, selection, 0.0)
         self.selection = selection
 
         self.feature_data = {}
@@ -32,46 +32,34 @@ class ResidueDensity(FeatureClass):
 
         self.residue_types = config.AA_properties
 
-    def get(self):
+    def get(self, cutoff=5.5):
         """Get residue contacts.
 
         Raises:
             ValueError: No residue contact found.
         """
 
-        res = sql_get(self.sql, self.selection, "chainID, resSeq, resName")
+        contact_residues = get_contact_residues(self.sql, self.selection, cutoff)
 
         self.residue_contacts = {}
-        for key, other_res in res.items():
+        for key, key2 in contact_residues:
             # some residues are not amino acids
-            if key[2] not in self.residue_types:
+            if key[2] not in self.residue_types or key2[2] not in self.residue_types:
                 continue
 
             if key not in self.residue_contacts:
-                self.residue_contacts[key] = residue_pair(
-                    key, self.residue_types[key[2]])
-            self.residue_contacts[key].density['total'] += len(other_res)
+                self.residue_contacts[key] = residue_pair(key, self.residue_types[key[2]])
+            self.residue_contacts[key].density['total'] += 1
 
-            for key2 in other_res:
+            if key2 not in self.residue_contacts:
+                self.residue_contacts[key2] = residue_pair(key2, self.residue_types[key2[2]])
+            self.residue_contacts[key2].density['total'] += 1
 
-                # some residues are not amino acids
-                if key2[2] not in self.residue_types:
-                    continue
+            self.residue_contacts[key].density[self.residue_types[key2[2]]] += 1
+            self.residue_contacts[key].connections[self.residue_types[key2[2]]].append(key2)
 
-                self.residue_contacts[key].density[
-                    self.residue_types[key2[2]]] += 1
-                self.residue_contacts[key].connections[
-                    self.residue_types[key2[2]]].append(key2)
-
-                if key2 not in self.residue_contacts:
-                    self.residue_contacts[key2] = residue_pair(
-                        key2, self.residue_types[key2[2]])
-
-                self.residue_contacts[key2].density['total'] += 1
-                self.residue_contacts[key2].density[
-                    self.residue_types[key[2]]] += 1
-                self.residue_contacts[key2].connections[
-                    self.residue_types[key[2]]].append(key)
+            self.residue_contacts[key2].density[self.residue_types[key[2]]] += 1
+            self.residue_contacts[key2].connections[self.residue_types[key[2]]].append(key)
 
         # calculate the total number of contacts
         total_ctc = 0
@@ -121,7 +109,8 @@ class ResidueDensity(FeatureClass):
 
             # get the center
             _, xyz = self.get_residue_center(self.sql, res=key)
-            xyz_key = tuple([{self.selection.chains.index(key[0])] + xyz[0])
+
+            xyz_key = tuple([self.chains_label.index(key[0])] + xyz[0])
 
             self.feature_data_xyz['RCD_total'][xyz_key] = [
                 res.density['total']]

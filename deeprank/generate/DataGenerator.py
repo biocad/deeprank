@@ -16,6 +16,7 @@ from deeprank.generate import GridTools as gt
 import pdb2sql
 from pdb2sql.align import align as align_along_axis
 from pdb2sql.align import align_interface
+from deeprank.selection import InterfaceSelection
 
 try:
     from tqdm import tqdm
@@ -74,7 +75,7 @@ class DataGenerator(object):
             >>> h5file = '1ak4.hdf5'
             >>>
             >>> #init the data assembler
-            >>> database = DataGenerator(selection=ProteinSelection().add_contact_pair(ContactPair('C', 'D')),
+            >>> database = DataGenerator(selection=InterfaceSelection('C', 'D'),
             >>>                          pdb_source=pdb_source,
             >>>                          pdb_native=pdb_native,
             >>>                          pssm_source=pssm_source,
@@ -1586,7 +1587,7 @@ class DataGenerator(object):
         if dict_align['selection'] == 'interface':
             sqldb = align_interface(pdbfile, plane=dict_align['plane'],
                                     export=dict_align['export'],
-                                    selection=self.selection)
+                                    chain1=self.selection.chain1, chain2=self.selection.chain2)
 
         else:
 

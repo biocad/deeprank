@@ -1,40 +1,49 @@
+import logging
 import numpy
 import pdb2sql
 
+_log = logging.getLogger(__name__)
+
 
 class ProteinSelection:
-    def __init__(self, contact_atom_pairs, center_position, max_contact_distance):
-        self._contact_atom_pairs = contact_atom_pairs
-        self._center_position = center_position
-        self._max_contact_distance = max_contact_distance
-
-        self._atoms = set([])
-        for atom1, atom2 in self._contact_atom_pairs:
-            self._atoms.add(atom1)
-            self._atoms.add(atom2)
-
-    @property
-    def center_position(self):
-        return self._center_position
-
-    @property
-    def contact_atom_pairs(self):
-        return self._contact_atom_pairs
-
-    @property
-    def atoms(self):
-        return self._atoms
-
-    @property
-    def max_contact_distance(self):
-        return self._max_contact_distance
+    residue_key = "chainID,resSeq,resName"
 
 
-def get_squared_distance(p1, p2):
-    return sum([numpy.square(p1[i] - p2[i]) for i in range(3)])
+class InterfaceSelection(ProteinSelection):
+    def __init__(self, chain1, chain2):
+        self.chain1 = chain1
+        self.chain2 = chain2
 
 
-def get_mean_position(ps):
+class MutantSelection(ProteinSelection):
+    def __init__(self, chain, residue_number):
+        self.chain = chain
+        self.residue_number = residue_number
+
+
+def get_contact_atoms(sqldb, selection, max_interatomic_distance):
+    if type(selection) == InterfaceSelection:
+
+        d = sqldb.get_contact_atoms(cutoff=max_interatomic_distance,
+                                    chain1=selection.chain1, chain2=selection.chain2,
+                                    return_contact_pairs=True)
+        pairs = set([])
+        for a1, as2 in d.items():
+            for a2 in as2:
+                pairs.add(tuple(sorted([a1, a2])))
+
+        return sorted(pairs)
+
+    elif type(selection) == MutantSelection:
+        return get_atoms_around_residue(selection.chain, selection.residue_numbers,
+                                        max_interatomic_distance)
+    else:
+        raise TypeError(type(selection))
+
+
+def get_average_position(sqldb, atom_numbers):
+    ps = sqldb.get('x,y,z', rowID=atom_numbers)
+
     s = [0] * 3
     n = len(ps)
     for p in ps:
@@ -44,51 +53,75 @@ def get_mean_position(ps):
     return [s[i] / n for i in range(3)]
 
 
-def select_interface(pdb_path, chain1, chain2, max_atom_distance=8.5,
-                     extend_to_residue=False, only_backbone=False, exclude_hydrogen=False):
-    if chain1 == chain2:
-        raise ValueError("cannot select an intra chain interface")
+def get_atoms(sqldb, selection, max_interatomic_distance):
+    atoms = set([])
+    for atom1, atom2 in get_contact_atoms(sqldb, selection, max_interatomic_distance):
+        atoms.add(atom1)
+        atoms.add(atom2)
 
-    sqldb = pdb2sql.interface(pdb_path)
-
-    try:
-        d = sqldb.get_contact_atoms(cutoff=max_atom_distance, chain1=chain1, chain2=chain2,
-                                    extend_to_residue=extend_to_residue,
-                                    only_backbone_atoms=only_backbone,
-                                    excludeH=exclude_hydrogen,
-                                    return_contact_pairs=True)
-
-        pairs = []
-        atoms = set([])
-        for atom1, atoms2 in d.items():
-            atoms.add(atom1)
-            for atom2 in atoms2:
-                atoms.add(atom2)
-                pairs.append((atom1, atom2))
-
-        positions = [sqldb.get('x,y,z', rowID=atom)[0] for atom in atoms]
-
-        return ProteinSelection(pairs, get_mean_position(positions), max_atom_distance)
-    finally:
-        sqldb._close()
+    return sorted(atoms)
 
 
-def select_residue_environment(pdb_path, chain, residue_number, distance_around_residue=5.5):
+def get_center(sqldb, selection, max_interatomic_distance):
+    if type(selection) == InterfaceSelection:
+        return get_average_position(sqldb, get_atoms(sqldb, selection, max_interatomic_distance))
 
-    squared_max_distance = numpy.square(distance_around_residue)
+    elif type(selection) == MutantSelection:
+        return get_residue_position(sqldb, selection.chain, selection.residue_number)
 
-    sqldb = pdb2sql.interface(pdb_path)
+    else:
+        raise TypeError(type(selection))
 
-    try:
-        center_atom = sqldb.get('rowID', chainID=chain, resSeq=residue_number, name='CA')[0]
-        center = sqldb.get('x,y,z', rowID=center_atom)[0]
 
-        atoms_with_positions = sqldb.get('rowID,x,y,z')
+def get_contact_residues(sqldb, selection, max_interatomic_distance):
+    if type(selection) == InterfaceSelection:
+        d = sqldb.get_contact_residues(cutoff=max_interatomic_distance,
+                                       chain1=selection.chain1, chain2=selection.chain2,
+                                       return_contact_pairs=True)
+        pairs = set()
+        for r1, rs2 in d.items():
+            for r2 in rs2:
+                pairs.add(tuple(sorted([tuple(r1), tuple(r2)])))
 
-        nearby_atoms = [atom[0] for atom in atoms_with_positions if get_squared_distance(atom[1: 4], center) < squared_max_distance]
+        return sorted(pairs)
 
-        pairs = [(center_atom, nearby_atom) for nearby_atom in nearby_atoms if nearby_atom != center_atom]
+    elif type(selection) == MutantSelection:
+        return get_residues_around_residue(selection.chain, selection.residue_number, max_interatomic_distance)
 
-        return ProteinSelection(pairs, center, distance_around_residue)
-    finally:
-        sqldb._close()
+    else:
+        raise TypeError(type(selection))
+
+def get_residues(sqldb, selection, max_interatomic_distance):
+    residues = set([])
+    if type(selection) == MutantSelection:
+        residues.add(sqldb.get(ProteinSelection.residue_key, chainID=selection.chain, resSeq=selection.residue_number)[0])
+
+    for res1, res2 in get_contact_residues(sqldb, selection, max_interatomic_distance):
+        residues.add(res1)
+        residues.add(res2)
+
+    return sorted(residues)
+
+
+def get_chains(sqldb, selection, max_interatomic_distance):
+    chains = set([])
+    if type(selection) == InterfaceSelection:
+        chains.add(selection.chain1)
+        chains.add(selection.chain2)
+
+    elif type(selection) == MutantSelection:
+        chains.add(selection.chain)
+
+    for res1, res2 in get_contact_residues(sqldb, selection, max_interatomic_distance):
+        for res in [res1, res2]:
+            keys = ProteinSelection.residue_key.split(',')
+
+            d = {keys[i]: res[i] for i in range(len(keys))}
+            chains.add(d['chainID'])
+
+    return sorted(chains)
+
+
+def get_squared_distance(p1, p2):
+    return sum([numpy.square(p1[i] - p2[i]) for i in range(3)])
+

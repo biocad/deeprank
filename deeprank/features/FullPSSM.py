@@ -6,7 +6,7 @@ import pdb2sql
 
 from deeprank import config
 from deeprank.features import FeatureClass
-from deeprank.selection import sql_get, ContactPair, ProteinSelection
+from deeprank.selection import InterfaceSelection, get_residues, get_chains
 
 ########################################################################
 #
@@ -16,9 +16,8 @@ from deeprank.selection import sql_get, ContactPair, ProteinSelection
 
 
 class FullPSSM(FeatureClass):
-
-    def __init__(self, mol_name=None, pdb_file=None, selection=ProteinSelection().add_contact_pair(ContactPair('A', 'B'))
-                pssm_path=None, pssm_format='new', out_type='pssmvalue'):
+    def __init__(self, mol_name=None, pdb_file=None, selection=InterfaceSelection('A', 'B'),
+                 pssm_path=None, pssm_format='new', out_type='pssmvalue'):
         """Compute all the PSSM data.
 
             Simply extracts all the PSSM information and
@@ -38,7 +37,6 @@ class FullPSSM(FeatureClass):
         Examples:
             >>> path = '/home/test/PSSM_newformat/'
             >>> pssm = FullPSSM(mol_name='2ABZ',
-            >>>                pdb_file='2ABZ_1w.pdb',
             >>>                pssm_path=path)
             >>> pssm.read_PSSM_data()
             >>> pssm.get_feature_value()
@@ -163,11 +161,11 @@ class FullPSSM(FeatureClass):
 
         self.pssm = dict(zip(self.pssm_res_id, self.pssm_data))
 
-    def get_feature_value(self):
+    def get_feature_value(self, cutoff=5.5):
         """get the feature value."""
 
-        with pdb2sql.interface(self.pdb_file) as sql:
-
+        sql = pdb2sql.interface(self.pdb_file)
+        try:
             # set achors for all residues and get their xyz
             xyz_info, xyz = self.get_residue_center(sql)
 
@@ -176,9 +174,11 @@ class FullPSSM(FeatureClass):
                 xyz_dict[tuple(info)] = pos
 
             # get interface contact residues
-            # ctc_res = {"A":[chain 1 residues], "B": [chain2 residues]}
 
-            ctc_res = sorted(set(sql_get(sql, self.selection, 'chainID, resSeq, resName')))
+            ctc_res = get_residues(sql, self.selection, cutoff)
+            chains = get_chains(sql, self.selection, cutoff)
+        finally:
+            sql._close()
 
         # handle with small interface or no interface
         total_res = len(ctc_res)
@@ -213,8 +213,8 @@ class FullPSSM(FeatureClass):
 
         # get feature values
         for res in ctc_res_with_pssm:
-            chain = self.selection.chains.index(res[0])
-            key = tuple([chain] + xyz_dict[res])
+            chain_index = chains.index(res[0])
+            key = tuple([chain_index] + xyz_dict[res])
             for name, value in zip(self.feature_names, self.pssm[res]):
                 # Make sure the feature_names and pssm[res] have
                 # consistent order of the 20 residue types

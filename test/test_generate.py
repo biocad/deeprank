@@ -3,6 +3,7 @@ import unittest
 from time import time
 import shutil
 from deeprank.generate import *
+from deeprank.selection import InterfaceSelection
 
 
 """
@@ -17,10 +18,10 @@ class TestGenerateData(unittest.TestCase):
     """Test the data generation process."""
 
     h5file = ['./1ak4.hdf5', 'native.hdf5']
-    pdb_source = ['./1AK4/decoys/', './1AK4/native/']
+    pdb_source = ['test/1AK4/decoys/', 'test/1AK4/native/']
     # pdb_native is only used to calculate i-RMSD, dockQ and so on. The native
     # pdb files will not be saved in the hdf5 file
-    pdb_native = ['./1AK4/native/']
+    pdb_native = ['test/1AK4/native/']
 
     def test_1_generate(self):
         """Generate the database."""
@@ -39,11 +40,10 @@ class TestGenerateData(unittest.TestCase):
         for h5, src in zip(self.h5file, self.pdb_source):
 
             database = DataGenerator(
-                chain1='C',
-                chain2='D',
+                selection=InterfaceSelection('C', 'D'),
                 pdb_source=src,
                 pdb_native=self.pdb_native,
-                pssm_source='./1AK4/pssm_new/',
+                pssm_source='test/1AK4/pssm_new/',
                 data_augmentation=1,
                 compute_targets=[
                     'deeprank.targets.dockQ',
@@ -107,11 +107,10 @@ class TestGenerateData(unittest.TestCase):
         # init the data assembler
 
         database = DataGenerator(
-            chain1='C',
-            chain2='D',
+            selection=InterfaceSelection('C', 'D'),
             pdb_source=src,
             pdb_native=self.pdb_native,
-            pssm_source='./1AK4/pssm_new/',
+            pssm_source='test/1AK4/pssm_new/',
             # data_augmentation=1,
             compute_targets=[
                 'deeprank.targets.dockQ',
@@ -135,7 +134,7 @@ class TestGenerateData(unittest.TestCase):
         for h5 in self.h5file:
 
             # init the data assembler
-            database = DataGenerator(chain1='C', chain2='D',
+            database = DataGenerator(selection=InterfaceSelection('C', 'D'),
                 compute_targets=['deeprank.targets.binary_class'], hdf5=h5)
 
             t0 = time()
@@ -148,7 +147,7 @@ class TestGenerateData(unittest.TestCase):
     def test_3_add_unique_target(self):
         """"Add a unique target to all the confs."""
         for h5 in self.h5file:
-            database = DataGenerator(chain1='C', chain2='D', hdf5=h5)
+            database = DataGenerator(selection=InterfaceSelection('C', 'D'), hdf5=h5)
             database.add_unique_target({'XX': 1.0})
 
     def test_4_add_feature(self):
@@ -158,12 +157,11 @@ class TestGenerateData(unittest.TestCase):
 
             # init the data assembler
             database = DataGenerator(
-                chain1='C',
-                chain2='D',
+                selection=InterfaceSelection('C', 'D'),
                 pdb_source=None,
                 pdb_native=None,
                 data_augmentation=None,
-                pssm_source='./1AK4/pssm_new/',
+                pssm_source='test/1AK4/pssm_new/',
                 compute_features=['deeprank.features.FullPSSM'],
                 hdf5=h5)
 
@@ -202,11 +200,10 @@ class TestGenerateData(unittest.TestCase):
                 os.remove(f)
 
         database = DataGenerator(
-            chain1='C',
-            chain2='D',
-            pdb_source='./1AK4/decoys/',
+            selection=InterfaceSelection('C', 'D'),
+            pdb_source='test/1AK4/decoys/',
             pdb_native=self.pdb_native,
-            pssm_source='./1AK4/pssm_new/',
+            pssm_source='test/1AK4/pssm_new/',
             align={"axis":'z'},
             data_augmentation=1,
             compute_targets=['deeprank.targets.dockQ'],
@@ -235,16 +232,15 @@ class TestGenerateData(unittest.TestCase):
                 os.remove(f)
 
         database = DataGenerator(
-            pdb_source='./1AK4/decoys/',
+            pdb_source='test/1AK4/decoys/',
             pdb_native=self.pdb_native,
-            pssm_source='./1AK4/pssm_new/',
+            pssm_source='test/1AK4/pssm_new/',
             align={"plane":'xy', "selection":'interface'},
             data_augmentation=1,
             compute_targets=['deeprank.targets.dockQ'],
             compute_features=['deeprank.features.AtomicFeature'],
             hdf5='./1ak4_aligned_interface.hdf5',
-            chain1='C',
-            chain2='D')
+            selection=InterfaceSelection('C','D'))
 
         # create the database
         if not os.path.isfile(database.hdf5):
@@ -264,7 +260,7 @@ class TestGenerateData(unittest.TestCase):
         os.remove(copy_name)
         shutil.copy(src_name,copy_name)
 
-        database = DataGenerator(hdf5=copy_name, chain1='C', chain2='D')
+        database = DataGenerator(hdf5=copy_name, selection=InterfaceSelection('C', 'D'))
         database.realign_complexes(align={'axis':'z'})
 
     def test_8_aug_data(self):
@@ -274,7 +270,7 @@ class TestGenerateData(unittest.TestCase):
 
         shutil.copy(src_name, copy_name)
 
-        database = DataGenerator(hdf5=copy_name, chain1='C', chain2='D')
+        database = DataGenerator(hdf5=copy_name, selection=InterfaceSelection('C', chain2='D'))
         database.aug_data(augmentation=2, keep_existing_aug=True)
         grid_info = {
             'number_of_points': [10, 10, 10],

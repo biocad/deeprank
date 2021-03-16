@@ -3,7 +3,7 @@ import warnings
 import pdb2sql
 
 from deeprank.features import FeatureClass
-from deeprank.selection import ContactPair, ProteinSelection, sql_get
+from deeprank.selection import InterfaceSelection, get_chains, get_residues
 
 try:
     import freesasa
@@ -15,7 +15,7 @@ except ImportError:
 
 class BSA(FeatureClass):
 
-    def __init__(self, pdb_data, selection=ProteinSelection().add_contact_pair(ContactPair('A', 'B')):
+    def __init__(self, pdb_data, selection=InterfaceSelection('A', 'B')):
         """Compute the burried surface area feature.
 
         Freesasa is required for this feature.
@@ -36,7 +36,7 @@ class BSA(FeatureClass):
         self.pdb_data = pdb_data
         self.sql = pdb2sql.interface(pdb_data)
         self.selection = selection
-        self.chains_label = selection.chains
+        self.chains_label = get_chains(self.sql, selection, 0.0)
 
         self.feature_data = {}
         self.feature_data_xyz = {}
@@ -82,17 +82,10 @@ class BSA(FeatureClass):
             ValueError: No interface residues found.
         """
 
-        contact_pairs = self.selection.contact_pairs
-        if len(contact_pairs) < 1:
-            raise ValueError("cannot compute contact residues for a set of {} contact pairs".format(len(contact_pairs)))
-
         self.bsa_data = {}
         self.bsa_data_xyz = {}
 
-        ctc_res = []
-        for pair in contact_pairs:
-            residues = self.sql.get_contact_residues(cutoff=cutoff, chain1=pair.chain1, chain2=pair.chain2)
-            ctc_res += residues[pair.chain1] + residues[pair.chain2]
+        ctc_res = get_residues(self.sql, self.selection, cutoff)
 
         # handle with small interface or no interface
         total_res = len(ctc_res)
@@ -122,7 +115,7 @@ class BSA(FeatureClass):
             bsa = asa_unbound - asa_complex
 
             # define the xyz key: (chain,x,y,z)
-            chain = self.selection.chains.index(res[0])
+            chain = self.chains_label.index(res[0])
 
             # get the center
             _, xyz = self.get_residue_center(self.sql, res=res)

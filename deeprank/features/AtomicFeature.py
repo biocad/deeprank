@@ -6,6 +6,7 @@ import numpy as np
 import pdb2sql
 
 from deeprank.features import FeatureClass
+from deeprank.selection import get_atoms, get_contact_atoms, InterfaceSelection
 
 
 _log = logging.getLogger(__name__)
@@ -13,16 +14,14 @@ _log = logging.getLogger(__name__)
 
 class AtomicFeature(FeatureClass):
 
-    def __init__(self, pdbfile, selection, param_charge=None,
-                param_vdw=None, patch_file=None,
-                contact_cutoff=8.5,
-                verbose=False):
+    def __init__(self, pdbfile, selection=InterfaceSelection('A', 'B'), param_charge=None,
+                 param_vdw=None, patch_file=None,
+                 contact_cutoff=8.5,
+                 verbose=False):
         """Compute the Coulomb, van der Waals interaction and charges.
 
         Args:
-
             pdbfile (str): pdb file of the molecule
-
             selection (selection object): the protein region of interest
 
             param_charge (str): file name of the force field file
@@ -42,6 +41,9 @@ class AtomicFeature(FeatureClass):
                 The way we handle the patching is very manual and
                 should be made more automatic.
 
+            contact_cutoff (float): the maximum distance in Å
+                between 2 contact atoms.
+
             verbose (bool): print or not.
 
         Examples:
@@ -54,7 +56,7 @@ class AtomicFeature(FeatureClass):
             >>>     'deeprank.features','') + '/forcefield/'
             >>>
             >>> # declare the feature calculator instance
-            >>> atfeat = AtomicFeature(pdb,
+            >>> atfeat = AtomicFeature(pdb, InterfaceSelection('A', 'B'),
             >>>    param_charge = FF + 'protein-allhdg5-4_new.top',
             >>>    param_vdw    = FF + 'protein-allhdg5-4_new.param',
             >>>    patch_file   = FF + 'patch.top')
@@ -87,7 +89,7 @@ class AtomicFeature(FeatureClass):
         self.atom_key = 'chainID, resSeq, resName, name'
 
         # read the pdb as an sql
-        self.sqldb = pdb2sql.pdb2sql(self.pdbfile)
+        self.sqldb = pdb2sql.interface(self.pdbfile)
 
         # read the force field
         self.read_charge_file()
@@ -222,10 +224,10 @@ class AtomicFeature(FeatureClass):
         contacting."""
 
         # extract the data
-        data = self.sqldb.get(self.residue_key, self.selection.atoms)
+        data = self.sqldb.get(self.residue_key, rowID=get_atoms(self.sqldb, self.selection, self.contact_cutoff))
 
         # extract uniques
-        res = list(set(data))
+        res = list(set([tuple(x) for x in data]))
 
         # extend
         index = []
@@ -449,12 +451,12 @@ class AtomicFeature(FeatureClass):
         if extend_contact_to_residue:
             index_atoms = self._extend_selection_to_residue()
         else:
-            index_atoms = self.selection.atoms
+            index_atoms = get_atoms(self.sqldb, self.selection, self.contact_cutoff)
 
         chains = sorted(set(self.sqldb.get('chainID')))
 
         # loop over the chain A
-        for i in atoms:
+        for i in index_atoms:
 
             # atinfo
             key = tuple(atinfo[i])
@@ -484,7 +486,7 @@ class AtomicFeature(FeatureClass):
             print('-- Compute interaction energy for contact pairs only')
 
         # extract information from the pdb2sql
-        atom_pairs = self.selection.contact_atom_pairs
+        atom_pairs = get_contact_atoms(self.sqldb, self.selection, self.contact_cutoff)
         xyz = {r[0]: r[1:4] for r in self.sqldb.get('rowID, x,y,z')}
         atinfo = self.sqldb.get(self.atom_key)
 
@@ -550,13 +552,13 @@ class AtomicFeature(FeatureClass):
 
                 # store in the dicts
                 atom_key = tuple(atinfo[atom])
-                electro_data[atom_key] = electro_data.get(atom_key, 0) + ec
-                vdw_data[atom_key] = vdw_data.get(atom_key, 0) + evdw
+                electro_data[atom_key] = electro_data.get(atom_key, []) + [ec]
+                vdw_data[atom_key] = vdw_data.get(atom_key, []) + [evdw]
 
                 # store in the xyz dict
                 xyz_key = tuple([atom] + xyz[atom])
-                electro_data_xyz[xyz_key] = electro_data_xyz.get(xyz_key, 0) + ec
-                vdw_data_xyz[xyz_key] = vdw_data_xyz.get(xyz_key, 0) + evdw
+                electro_data_xyz[xyz_key] = electro_data_xyz.get(xyz_key, []) + [ec]
+                vdw_data_xyz[xyz_key] = vdw_data_xyz.get(xyz_key, []) + [evdw]
 
             _log.debug("interaction between {} and {}: r={}, ec={}, evdw={}"
                        .format(tuple(atinfo[atomA]), tuple(atinfo[atomB]), r, ec, evdw))
