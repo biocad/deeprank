@@ -86,7 +86,7 @@ class TestAtomicFeature(unittest.TestCase):
             'deeprank.features', '') + '/forcefield/'
 
         # declare the feature calculator instance
-        atfeat = AtomicFeature(pdb, select_interface(pdb, 'A', 'B', atom_distance=8.5),
+        atfeat = AtomicFeature(pdb, select_interface(pdb, 'A', 'B', max_atom_distance=8.5),
                                param_charge=FF + 'protein-allhdg5-4_new.top',
                                param_vdw=FF + 'protein-allhdg5-4_new.param',
                                patch_file=FF + 'patch.top')
@@ -107,8 +107,8 @@ class TestAtomicFeature(unittest.TestCase):
             ref_elec[ref_atom1] = ref_elec.get(ref_atom1, 0) + elec
             ref_elec[ref_atom2] = ref_elec.get(ref_atom2, 0) + elec
 
-            ref_vdw[ref_atom1] = ref_vdw.get(ref_atom1, 0) + elec
-            ref_vdw[ref_atom2] = ref_vdw.get(ref_atom2, 0) + elec
+            ref_vdw[ref_atom1] = ref_vdw.get(ref_atom1, 0) + vdw
+            ref_vdw[ref_atom2] = ref_vdw.get(ref_atom2, 0) + vdw
 
         # Compare the values
         _log.debug("{} ref atoms, {} coulomb atoms, {} vdwaals atoms"
