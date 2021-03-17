@@ -9,17 +9,17 @@ from deeprank.features import FeatureClass
 
 class AtomicFeature(FeatureClass):
 
-    def __init__(self, pdbfile, chain1='A', chain2='B', param_charge=None,
-                param_vdw=None, patch_file=None, contact_cutoff=8.5,
-                verbose=False):
+    def __init__(self, pdbfile, chains1=None, chains2=None, param_charge=None,
+                 param_vdw=None, patch_file=None, contact_cutoff=8.5,
+                 verbose=False):
         """Compute the Coulomb, van der Waals interaction and charges.
 
         Args:
 
             pdbfile (str): pdb file of the molecule
 
-            chain1 (str): First chain ID, defaults to 'A'
-            chain2 (str): Second chain ID, defaults to 'B'
+            chains1 (str): First chain IDs, defaults to 'A'
+            chains2 (str): Second chain IDs, defaults to 'B'
 
             param_charge (str): file name of the force field file
                 containing the charges e.g. protein-allhdg5.4_new.top.
@@ -71,9 +71,11 @@ class AtomicFeature(FeatureClass):
         super().__init__("Atomic")
 
         # set a few things
+        if chains1 is None:
+            chains1 = ['A']
         self.pdbfile = pdbfile
-        self.chain1 = chain1
-        self.chain2 = chain2
+        self.chains1 = chains1
+        self.chains2 = chains2
         self.param_charge = param_charge
         self.param_vdw = param_vdw
         self.patch_file = patch_file
@@ -228,16 +230,16 @@ class AtomicFeature(FeatureClass):
         # but need to add a filter parameter to filter out ligand.
 
         # position of the chains
-        xyz1 = np.array(self.sqldb.get('x,y,z', chainID=self.chain1))
-        xyz2 = np.array(self.sqldb.get('x,y,z', chainID=self.chain2))
+        xyz1 = np.array(self.sqldb.get('x,y,z', chainID=self.chains1))
+        xyz2 = np.array(self.sqldb.get('x,y,z', chainID=self.chains2))
 
         # rowID of the chains
-        index_a = self.sqldb.get('rowID', chainID=self.chain1)
-        index_b = self.sqldb.get('rowID', chainID=self.chain2)
+        index_a = self.sqldb.get('rowID', chainID=self.chains1)
+        index_b = self.sqldb.get('rowID', chainID=self.chains2)
 
         # resName of the chains
-        resName1 = np.array(self.sqldb.get('resName', chainID=self.chain1))
-        resName2 = np.array(self.sqldb.get('resName', chainID=self.chain2))
+        resName1 = np.array(self.sqldb.get('resName', chainID=self.chains1))
+        resName2 = np.array(self.sqldb.get('resName', chainID=self.chains2))
 
         # declare the contact atoms
         self.contact_atoms_A = []
@@ -542,7 +544,7 @@ class AtomicFeature(FeatureClass):
             charge_data[key] = [charge[i]]
 
             # xyz format
-            chain_dict = [{self.chain1: 0, self.chain2: 1}[key[0]]]
+            chain_dict = [{self.chains1: 0, self.chains2: 1}[key[0]]]
             key = tuple(chain_dict + xyz[i, :].tolist())
             charge_data_xyz[key] = [charge[i]]
 
@@ -588,8 +590,8 @@ class AtomicFeature(FeatureClass):
         vdw_data_xyz = {}
 
         # define the matrices
-        natA, natB = len(self.sqldb.get('x', chainID=self.chain1)), len(
-            self.sqldb.get('x', chainID=self.chain2))
+        natA, natB = len(self.sqldb.get('x', chainID=self.chains1)), len(
+            self.sqldb.get('x', chainID=self.chains2))
         matrix_elec = np.zeros((natA, natB))
         matrix_vdw = np.zeros((natA, natB))
 
@@ -759,16 +761,16 @@ class AtomicFeature(FeatureClass):
 
         else:
 
-            xyzA = np.array(self.sqldb.get('x,y,z', chainID=self.chain1))
-            xyzB = np.array(self.sqldb.get('x,y,z', chainID=self.chain2))
+            xyzA = np.array(self.sqldb.get('x,y,z', chainID=self.chains1))
+            xyzB = np.array(self.sqldb.get('x,y,z', chainID=self.chains2))
 
-            chargeA = np.array(self.sqldb.get('CHARGE', chainID=self.chain1))
-            chargeB = np.array(self.sqldb.get('CHARGE', chainID=self.chain2))
+            chargeA = np.array(self.sqldb.get('CHARGE', chainID=self.chains1))
+            chargeB = np.array(self.sqldb.get('CHARGE', chainID=self.chains2))
 
             atinfoA = self.sqldb.get(
-                self.atom_key, chainID=self.chain1)
+                self.atom_key, chainID=self.chains1)
             atinfoB = self.sqldb.get(
-                self.atom_key, chainID=self.chain2)
+                self.atom_key, chainID=self.chains2)
 
         natA, natB = len(xyzA), len(xyzB)
         matrix = np.zeros((natA, natB))
@@ -843,19 +845,19 @@ class AtomicFeature(FeatureClass):
 
         else:
 
-            xyzA = np.array(self.sqldb.get('x,y,z', chainID=self.chain1))
-            xyzB = np.array(self.sqldb.get('x,y,z', chainID=self.chain2))
+            xyzA = np.array(self.sqldb.get('x,y,z', chainID=self.chains1))
+            xyzB = np.array(self.sqldb.get('x,y,z', chainID=self.chains2))
 
-            vdwA = np.array(self.sqldb.get('eps,sig', chainID=self.chain1))
-            vdwB = np.array(self.sqldb.get('eps,sig', chainID=self.chain2))
+            vdwA = np.array(self.sqldb.get('eps,sig', chainID=self.chains1))
+            vdwB = np.array(self.sqldb.get('eps,sig', chainID=self.chains2))
 
             epsA, sigA = vdwA[:, 0], vdwA[:, 1]
             epsB, sigB = vdwB[:, 0], vdwB[:, 1]
 
             atinfoA = self.sqldb.get(
-                self.atom_key, chainID=self.chain1)
+                self.atom_key, chainID=self.chains1)
             atinfoB = self.sqldb.get(
-                self.atom_key, chainID=self.chain2)
+                self.atom_key, chainID=self.chains2)
 
         natA, natB = len(xyzA), len(xyzB)
         matrix = np.zeros((natA, natB))
@@ -914,22 +916,22 @@ class AtomicFeature(FeatureClass):
 #
 ########################################################################
 
-def __compute_feature__(pdb_data, featgrp, featgrp_raw, chain1, chain2):
+def __compute_feature__(pdb_data, featgrp, featgrp_raw, chains1, chains2):
     """Main function called in deeprank for the feature calculations.
 
     Args:
         pdb_data (list(bytes)): pdb information
         featgrp (str): name of the group where to save xyz-val data
         featgrp_raw (str): name of the group where to save human readable data
-        chain1 (str): First chain ID
-        chain2 (str): Second chain ID
+        chains1 (str or list): List of first chains ID or first chain ID as str
+        chains2 (str or list):  List of second chains ID or second chain ID as str
     """
     path = os.path.dirname(os.path.realpath(__file__))
     FF = path + '/forcefield/'
 
     atfeat = AtomicFeature(pdb_data,
-                           chain1=chain1,
-                           chain2=chain2,
+                           chains1=chains1,
+                           chains2=chains2,
                            param_charge=FF + 'protein-allhdg5-4_new.top',
                            param_vdw=FF + 'protein-allhdg5-4_new.param',
                            patch_file=FF + 'patch.top')
