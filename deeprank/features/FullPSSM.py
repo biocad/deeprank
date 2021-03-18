@@ -218,7 +218,13 @@ class FullPSSM(FeatureClass):
 
         # get feature values
         for res in ctc_res_with_pssm:
-            chain = {self.chain1: 0, self.chain2: 1}[res[0]]
+            temp_dict = dict()
+            for c in self.chain1:
+                temp_dict[c] = 0
+            for c in self.chain2:
+                temp_dict[c] = 1
+
+            chain = temp_dict[res[0]]
             key = tuple([chain] + xyz_dict[res])
             for name, value in zip(self.feature_names, self.pssm[res]):
                 # Make sure the feature_names and pssm[res] have
