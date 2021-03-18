@@ -1,5 +1,6 @@
 import os
 import warnings
+import itertools
 
 import numpy as np
 import pdb2sql
@@ -178,10 +179,21 @@ class FullPSSM(FeatureClass):
 
         # get interface contact residues
         # ctc_res = {"A":[chain 1 residues], "B": [chain2 residues]}
-        ctc_res = sql.get_contact_residues(cutoff=cutoff,
-                            chain1=self.chain1, chain2=self.chain2)
+        # ctc_res = sql.get_contact_residues(cutoff=cutoff,
+        #                     chain1=self.chain1, chain2=self.chain2)
+
+        ctc_res_raw = []
+
+        for c1, c2 in itertools.product(self.chain1, self.chain2):
+            d =  sql.get_contact_residues(cutoff=cutoff,
+                            chain1=c1, chain2=c2)
+            ctc_res_raw += d[c1]
+            ctc_res_raw += d[c2]
+
+        ctc_res = list(set(ctc_res_raw))
+
         sql._close()
-        ctc_res = ctc_res[self.chain1] + ctc_res[self.chain2]
+        # ctc_res = ctc_res[self.chain1] + ctc_res[self.chain2]
 
         # handle with small interface or no interface
         total_res = len(ctc_res)
