@@ -8,13 +8,13 @@ from deeprank import config
 
 class ResidueDensity(FeatureClass):
 
-    def __init__(self, pdb_data, chain1='A', chain2='B'):
+    def __init__(self, pdb_data, chains1='A', chains2='B'):
         """Compute the residue contacts between polar/apolar/charged residues.
 
         Args:
             pdb_data (list(byte) or str): pdb data or pdb filename
-            chain1 (str): First chain ID. Defaults to 'A'
-            chain2 (str): Second chain ID. Defaults to 'B'
+            chains1 (str): First chain ID. Defaults to 'A'
+            chains2 (str): Second chain ID. Defaults to 'B'
 
         Example:
             >>> rcd = ResidueDensity('1EWY_100w.pdb')
@@ -24,9 +24,9 @@ class ResidueDensity(FeatureClass):
 
         self.pdb_data = pdb_data
         self.sql = pdb2sql.interface(pdb_data)
-        self.chains_label = [chain1, chain2]
-        self.chain1 = chain1
-        self.chain2 = chain2
+        self.chains_label = [chains1, chains2]
+        self.chains1 = chains1
+        self.chains2 = chains2
 
         self.feature_data = {}
         self.feature_data_xyz = {}
@@ -42,10 +42,27 @@ class ResidueDensity(FeatureClass):
         # res = {('chain1,resSeq,resName'): set(
         #                               ('chain2,res1Seq,res1Name),
         #                               ('chain2,res2Seq,res2Name'))}
-        res = self.sql.get_contact_residues(chain1=self.chains_label[0],
-                                           chain2=self.chains_label[1],
-                                           cutoff=cutoff,
-                                           return_contact_pairs=True)
+
+        chain_pairs = list(itertools.product(self.chains1, self.chains2))
+
+        contact_dicts = [self.sql.get_contact_residues(chain1=chain1,
+                                                       chain2=chain2,
+                                                       cutoff=cutoff,
+                                                       return_contact_pairs=True) for chain1, chain2 in chain_pairs]
+
+        res = dict()
+
+        for d in contact_dicts:
+            for key, reslist in d.items():
+                if key not in res:
+                    res[key] = reslist
+                else:
+                    res[key] = list(set(res[key] + reslist))
+
+        # res = self.sql.get_contact_residues(chain1=self.chains_label[0],
+        #                                    chain2=self.chains_label[1],
+        #                                    cutoff=cutoff,
+        #                                    return_contact_pairs=True)
 
         self.residue_contacts = {}
         for key, other_res in res.items():
@@ -127,7 +144,7 @@ class ResidueDensity(FeatureClass):
 
             # get the center
             _, xyz = self.get_residue_center(self.sql, res=key)
-            xyz_key = tuple([{self.chain1: 0, self.chain2: 1}[key[0]]] + xyz[0])
+            xyz_key = tuple([{self.chains1: 0, self.chains2: 1}[key[0]]] + xyz[0])
 
             self.feature_data_xyz['RCD_total'][xyz_key] = [
                 res.density['total']]
@@ -170,7 +187,7 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, chain1, chain2):
     """
 
     # create instance
-    resdens = ResidueDensity(pdb_data, chain1=chain1, chain2=chain2)
+    resdens = ResidueDensity(pdb_data, chains1=chain1, chains2=chain2)
 
     # get the residue conacts
     resdens.get()

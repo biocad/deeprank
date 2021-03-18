@@ -942,7 +942,7 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, chains1, chains2):
     atfeat.evaluate_pair_interaction(print_interactions=False)
 
     # compute the charges
-    # here we extand the contact atoms to
+    # here we extend the contact atoms to
     # entire residue containing at least 1 contact atom
     atfeat.evaluate_charges(extend_contact_to_residue=True)
 
