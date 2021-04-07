@@ -144,7 +144,14 @@ class ResidueDensity(FeatureClass):
 
             # get the center
             _, xyz = self.get_residue_center(self.sql, res=key)
-            xyz_key = tuple([{self.chains1: 0, self.chains2: 1}[key[0]]] + xyz[0])
+
+            temp_dict = dict()
+            for c in self.chains1:
+                temp_dict[c] = 0
+            for c in self.chains2:
+                temp_dict[c] = 1
+
+            xyz_key = tuple([temp_dict[key[0]]] + xyz[0])
 
             self.feature_data_xyz['RCD_total'][xyz_key] = [
                 res.density['total']]
@@ -217,10 +224,10 @@ if __name__ == '__main__':
     # get base path */deeprank, i.e. the path of deeprank package
     base_path = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.realpath(__file__))))
-    pdb_file = os.path.join(base_path, "test/1AK4/native/1AK4.pdb")
+    pdb_file = os.path.join(base_path, "test/6woz/native/6woz.pdb")
 
     # create instance
-    resdens = ResidueDensity(pdb_file)
+    resdens = ResidueDensity(pdb_file, chains1=['E', 'F'], chains2=['D'])
 
     resdens.get()
     resdens.extract_features()

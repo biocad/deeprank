@@ -338,6 +338,7 @@ class AtomicFeature(FeatureClass):
             print('-- Assign force field parameters')
 
         data = self.sqldb.get(self.residue_key)
+        # total count of atoms in PBD file
         natom = len(data)
         data = np.unique(np.array(data), axis=0)
 
@@ -544,7 +545,12 @@ class AtomicFeature(FeatureClass):
             charge_data[key] = [charge[i]]
 
             # xyz format
-            chain_dict = [{self.chains1: 0, self.chains2: 1}[key[0]]]
+            chain_dict = dict()
+            for c in self.chains1:
+                chain_dict[c] = 0
+            for c in self.chains2:
+                chain_dict[c] = 1
+            chain_dict = [chain_dict[key[0]]]
             key = tuple(chain_dict + xyz[i, :].tolist())
             charge_data_xyz[key] = [charge[i]]
 
@@ -592,8 +598,23 @@ class AtomicFeature(FeatureClass):
         # define the matrices
         natA, natB = len(self.sqldb.get('x', chainID=self.chains1)), len(
             self.sqldb.get('x', chainID=self.chains2))
+
+        atomsA = self.sqldb.get('rowID', chainID=self.chains1)
+        atomsB = self.sqldb.get('rowID', chainID=self.chains2)
+
         matrix_elec = np.zeros((natA, natB))
         matrix_vdw = np.zeros((natA, natB))
+
+        # local_to_globalA = np.zeros(natA)
+        self.local_to_globalA = np.array(atomsA).astype('int32')
+        self.global_to_localA = np.zeros(natA + natB).astype('int32')
+        for loc, glob in enumerate(self.local_to_globalA):
+            self.global_to_localA[glob] = loc
+
+        self.local_to_globalB = np.array(atomsB).astype('int32')
+        self.global_to_localB = np.zeros(natB + natA).astype('int32')
+        for loc, glob in enumerate(self.local_to_globalB):
+            self.global_to_localB[glob] = loc
 
         # handle the export of the interaction breakdown
         _save_ = False
@@ -641,8 +662,8 @@ class AtomicFeature(FeatureClass):
             # here assumes that the chainID order is A,B...
             # otherwise rowID will be different with the matrix index
             indb_matrix = [i - natA for i in indsB]
-            matrix_elec[iA, indb_matrix] = ec
-            matrix_vdw[iA, indb_matrix] = evdw
+            matrix_elec[self.global_to_localA[iA], self.global_to_localB[indsB]] = ec
+            matrix_vdw[self.global_to_localA[iA], self.global_to_localB[indsB]] = evdw
 
             # store in the dicts
             electro_data[keyA] = [np.sum(ec)]
@@ -705,8 +726,8 @@ class AtomicFeature(FeatureClass):
             keyB = tuple(atinfo[indexB])
 
             # extract the values from the matrix
-            ec = matrix_elec[:, indexB - natA]
-            evdw = matrix_vdw[:, indexB - natA]
+            ec = matrix_elec[:, self.global_to_localB[indexB]]
+            evdw = matrix_vdw[:, self.global_to_localB[indexB]]
 
             # store in the dict
             electro_data[keyB] = [np.sum(ec)]
@@ -965,13 +986,15 @@ if __name__ == '__main__':
     from pprint import pprint
     base_path = os.path.dirname(os.path.dirname(os.path.dirname(
         os.path.realpath(__file__))))
-    pdb_file = os.path.join(base_path, "test/1AK4/native/1AK4.pdb")
+    pdb_file = os.path.join(base_path, "test/3h42/native/3h42.pdb")
     FF = os.path.join(base_path, 'deeprank/features/forcefield/')
 
     atfeat = AtomicFeature(pdb_file,
                            param_charge=FF + 'protein-allhdg5-4_new.top',
                            param_vdw=FF + 'protein-allhdg5-4_new.param',
                            patch_file=FF + 'patch.top',
+                           chains1=['H','L'],
+                           chains2=['A','B'],
                            verbose=True)
 
     atfeat.assign_parameters()

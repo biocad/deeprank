@@ -182,15 +182,13 @@ class FullPSSM(FeatureClass):
         # ctc_res = sql.get_contact_residues(cutoff=cutoff,
         #                     chain1=self.chain1, chain2=self.chain2)
 
-        ctc_res_raw = []
+        ctc_res_all = sql.get_contact_residues(cutoff=cutoff, allchains=True)
+        ctc_res = []
+        for c in self.chain1:
+            ctc_res += ctc_res_all[c]
 
-        for c1, c2 in itertools.product(self.chain1, self.chain2):
-            d =  sql.get_contact_residues(cutoff=cutoff,
-                            chain1=c1, chain2=c2)
-            ctc_res_raw += d[c1]
-            ctc_res_raw += d[c2]
-
-        ctc_res = list(set(ctc_res_raw))
+        for c in self.chain2:
+            ctc_res += ctc_res_all[c]
 
         sql._close()
         # ctc_res = ctc_res[self.chain1] + ctc_res[self.chain2]

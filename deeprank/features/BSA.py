@@ -1,4 +1,5 @@
 import warnings
+import itertools
 
 import pdb2sql
 
@@ -37,6 +38,7 @@ class BSA(FeatureClass):
         self.sql = pdb2sql.interface(pdb_data)
         self.chain1 = chain1
         self.chain2 = chain2
+        # now each of chain1 and chain2 is list o tuple
         self.chains_label = [chain1, chain2]
 
         self.feature_data = {}
@@ -86,8 +88,16 @@ class BSA(FeatureClass):
         self.bsa_data = {}
         self.bsa_data_xyz = {}
 
-        ctc_res = self.sql.get_contact_residues(cutoff=cutoff, chain1=self.chain1, chain2=self.chain2)
-        ctc_res = ctc_res[self.chain1] + ctc_res[self.chain2]
+        ctc_res_all = self.sql.get_contact_residues(cutoff=cutoff, allchains=True)
+        ctc_res = []
+        for c in self.chain1:
+            ctc_res += ctc_res_all[c]
+
+        for c in self.chain2:
+            ctc_res += ctc_res_all[c]
+
+        # ctc_res = self.sql.get_contact_residues(cutoff=cutoff, chain1=self.chain1, chain2=self.chain2)
+        # ctc_res = ctc_res[self.chain1] + ctc_res[self.chain2]
 
         # handle with small interface or no interface
         total_res = len(ctc_res)
