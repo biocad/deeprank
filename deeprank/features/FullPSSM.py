@@ -7,6 +7,7 @@ import pdb2sql
 
 from deeprank import config
 from deeprank.features import FeatureClass
+from deeprank.tools import interface
 
 ########################################################################
 #
@@ -168,7 +169,7 @@ class FullPSSM(FeatureClass):
     def get_feature_value(self, cutoff=5.5):
         """get the feature value."""
 
-        sql = pdb2sql.interface(self.pdb_file)
+        sql = interface(self.pdb_file)
 
         # set achors for all residues and get their xyz
         xyz_info, xyz = self.get_residue_center(sql)
@@ -182,7 +183,7 @@ class FullPSSM(FeatureClass):
         # ctc_res = sql.get_contact_residues(cutoff=cutoff,
         #                     chain1=self.chain1, chain2=self.chain2)
 
-        ctc_res_all = sql.get_contact_residues(cutoff=cutoff, allchains=True)
+        ctc_res_all = sql.get_contact_residues_with_icodes(cutoff=cutoff, allchains=True)
         ctc_res = []
         for c in self.chain1:
             ctc_res += ctc_res_all[c]

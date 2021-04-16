@@ -4,6 +4,7 @@ import pdb2sql
 
 from deeprank.features import FeatureClass
 from deeprank import config
+from deeprank.tools.interface import interface
 
 
 class ResidueDensity(FeatureClass):
@@ -23,7 +24,8 @@ class ResidueDensity(FeatureClass):
         """
 
         self.pdb_data = pdb_data
-        self.sql = pdb2sql.interface(pdb_data)
+        self.sql = interface(pdb_data)
+        # self.sql = pdb2sql.interface(pdb_data)
         self.chains_label = [chains1, chains2]
         self.chains1 = chains1
         self.chains2 = chains2
@@ -45,7 +47,7 @@ class ResidueDensity(FeatureClass):
 
         chain_pairs = list(itertools.product(self.chains1, self.chains2))
 
-        contact_dicts = [self.sql.get_contact_residues(chain1=chain1,
+        contact_dicts = [self.sql.get_contact_residues_with_icodes(chain1=chain1,
                                                        chain2=chain2,
                                                        cutoff=cutoff,
                                                        return_contact_pairs=True) for chain1, chain2 in chain_pairs]
@@ -67,34 +69,34 @@ class ResidueDensity(FeatureClass):
         self.residue_contacts = {}
         for key, other_res in res.items():
             # some residues are not amino acids
-            if key[2] not in self.residue_types:
+            if key[3] not in self.residue_types:
                 continue
 
             if key not in self.residue_contacts:
                 self.residue_contacts[key] = residue_pair(
-                    key, self.residue_types[key[2]])
+                    key, self.residue_types[key[3]])
             self.residue_contacts[key].density['total'] += len(other_res)
 
             for key2 in other_res:
 
                 # some residues are not amino acids
-                if key2[2] not in self.residue_types:
+                if key2[3] not in self.residue_types:
                     continue
 
                 self.residue_contacts[key].density[
-                    self.residue_types[key2[2]]] += 1
+                    self.residue_types[key2[3]]] += 1
                 self.residue_contacts[key].connections[
-                    self.residue_types[key2[2]]].append(key2)
+                    self.residue_types[key2[3]]].append(key2)
 
                 if key2 not in self.residue_contacts:
                     self.residue_contacts[key2] = residue_pair(
-                        key2, self.residue_types[key2[2]])
+                        key2, self.residue_types[key2[3]])
 
                 self.residue_contacts[key2].density['total'] += 1
                 self.residue_contacts[key2].density[
-                    self.residue_types[key[2]]] += 1
+                    self.residue_types[key[3]]] += 1
                 self.residue_contacts[key2].connections[
-                    self.residue_types[key[2]]].append(key)
+                    self.residue_types[key[3]]].append(key)
 
         # calculate the total number of contacts
         total_ctc = 0

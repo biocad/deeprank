@@ -3,9 +3,10 @@ import warnings
 
 import numpy as np
 from pdb2sql import StructureSimilarity
+from deeprank.tools import MultiChainStructureSimilarity
 
 
-def __compute_target__(decoy, targrp, tarname, save_file=False):
+def __compute_target__(decoy, targrp, tarname, chains1, chains2, save_file=False):
     """Calcuate CAPRI metric IRMSD, LRMSD or FNAT.
 
     Args:
@@ -77,7 +78,7 @@ def __compute_target__(decoy, targrp, tarname, save_file=False):
         # init the class
         decoy = molgrp['complex'][()]
         ref = molgrp['native'][()]
-        sim = StructureSimilarity(decoy, ref)
+        sim = MultiChainStructureSimilarity(decoy, ref, chains1=chains1, chains2=chains2)
 
         # comppute the izone/lzone/ref_pairs
         if tarname == "IRMSD":
@@ -85,9 +86,10 @@ def __compute_target__(decoy, targrp, tarname, save_file=False):
                 izone = ZONE + molname + '.izone'
             else:
                 izone = None
-            target = sim.compute_irmsd_fast(method='svd', izone=izone)
+            target = sim.compute_irmsd_pdb2sql_multi(method='svd', izone=izone)
 
         elif tarname == "LRMSD":
+            sim = StructureSimilarity(decoy, ref)
             if save_file:
                 lzone = ZONE + molname + '.lzone'
             else:
@@ -95,6 +97,7 @@ def __compute_target__(decoy, targrp, tarname, save_file=False):
             target = sim.compute_lrmsd_fast(method='svd', lzone=lzone)
 
         elif tarname == "FNAT":
+            sim = StructureSimilarity(decoy, ref)
             target = sim.compute_fnat_fast()
 
         targrp.create_dataset(tarname, data=np.array(target))

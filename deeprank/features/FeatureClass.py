@@ -123,9 +123,9 @@ class FeatureClass(object):
         """
 
         # get all residues if None were provided
-        # [chainID, resName, resSeq]
+        # [chainID, resName, iCode, resSeq]
         if res is None:
-            res = [tuple(x) for x in sql.get('chainID,resSeq,resName')]
+            res = [tuple(x) for x in sql.get('chainID, resSeq, iCode, resName')]
             res = sorted(set(res), key=res.index)
 
 
@@ -150,14 +150,16 @@ class FeatureClass(object):
                     xyz_res = sql.get('x,y,z',
                                       chainID=r[0],
                                       resSeq=r[1],
-                                      resName=r[2],
+                                      iCode=r[2],
+                                      resName=r[3],
                                       name=ctr)
 
                 elif ctr == 'mean':
                     xyz_res = [np.mean(sql.get('x,y,z',
                                        chainID=r[0],
                                        resSeq=r[1],
-                                       resName=r[2]),axis=0).tolist()]
+                                       iCode=r[2],
+                                       resName=r[3]),axis=0).tolist()]
 
                 else:
                     raise ValueError('Center %s not recognized' %c)

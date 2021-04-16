@@ -6,7 +6,7 @@ from deeprank.config import logger
 from deeprank.targets import rmsd_fnat
 
 
-def __compute_target__(decoy, targrp):
+def __compute_target__(decoy, targrp, chains1, chains2):
     """Calculate binary class ID using IRMSD.
 
     Args:
@@ -36,10 +36,10 @@ def __compute_target__(decoy, targrp):
     # process target element
     # if target element exist, then use its value; otherwise calculate it
     if tarelem not in targrp:
-        _ = rmsd_fnat.__compute_target__(decoy, targrp, tarelem)
+        _ = rmsd_fnat.__compute_target__(decoy, targrp, tarelem, chains1, chains2)
     # empty dataset
     elif targrp[tarelem][()].shape is None:
-        _ = rmsd_fnat.__compute_target__(decoy, targrp, tarelem)
+        _ = rmsd_fnat.__compute_target__(decoy, targrp, tarelem, chains1, chains2)
 
     # get irmsd value
     irmsd = targrp[tarelem][()]

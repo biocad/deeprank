@@ -281,7 +281,7 @@ class DataGenerator(object):
 
                 ################################################
                 #   get the pdbs of the conformation and its ref
-                #   for the original data (not augmetned one)
+                #   for the original data (not augmented one)
                 ################################################
 
                 if verbose:
@@ -384,7 +384,9 @@ class DataGenerator(object):
 
                     self._compute_targets(self.compute_targets,
                                           molgrp['complex'][()],
-                                          molgrp['targets'])
+                                          molgrp['targets'],
+                                          self.chain1,
+                                          self.chain2)
 
                     if verbose:
                         self.logger.info(
@@ -969,12 +971,21 @@ class DataGenerator(object):
     def _get_grid_center(self, pdb, contact_distance):
 
         sqldb = pdb2sql.interface(pdb)
-        contact_atoms = sqldb.get_contact_atoms(cutoff=contact_distance,
-            chain1=self.chain1, chain2=self.chain2)
 
         tmp = []
-        for i in contact_atoms.values():
-            tmp.extend(i)
+
+        for c1 in self.chain1:
+            for c2 in self.chain2:
+                contact_atoms = sqldb.get_contact_atoms(cutoff=contact_distance,
+                                                        chain1=c1, chain2=c2)
+                for i in contact_atoms.values():
+                    tmp.extend(i)
+
+
+
+        # tmp = []
+        # for i in contact_atoms.values():
+        #     tmp.extend(i)
         contact_atoms = list(set(tmp))
 
         center_contact = np.mean(
@@ -1551,7 +1562,7 @@ class DataGenerator(object):
 # ====================================================================================
 
     @staticmethod
-    def _compute_targets(targ_list, pdb_data, targrp):
+    def _compute_targets(targ_list, pdb_data, targrp, chains1, chains2):
         """Compute the targets.
 
         Args:
@@ -1562,7 +1573,7 @@ class DataGenerator(object):
         """
         for targ in targ_list:
             targ_module = importlib.import_module(targ, package=None)
-            targ_module.__compute_target__(pdb_data, targrp)
+            targ_module.__compute_target__(pdb_data, targrp, chains1, chains2)
 
 
 # ====================================================================================
