@@ -38,7 +38,13 @@ for cplx in tqdm(os.listdir(input_data_path), total=len(os.listdir(input_data_pa
                                  hdf5=os.path.join(hdf5_out_dir, f"{cplx}.hdf5"))
     try:
         complex_data.create_database(prog_bar=True)
+        grid_info = {'number_of_points': [30, 30, 30],
+                     'resolution': [1., 1., 1.],
+                     'atomic_densities': {'C': 1.7, 'N': 1.55, 'O': 1.52, 'S': 1.8}
+                     }
+        complex_data.map_features(grid_info, try_sparse=True, prog_bar=True)
     except ValueError as ve:
         print(ve)
         print(cplx)
         exit(1)
+

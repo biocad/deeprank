@@ -7,8 +7,10 @@ import numpy as np
 from scipy.signal import bspline
 import pdb2sql
 
+
 from deeprank.config import logger
 from deeprank.tools import sparse
+# from deeprank.tools.interface import interface
 
 try:
     from tqdm import tqdm
@@ -73,7 +75,7 @@ class GridTools(object):
         self.chain1 = chain1
         self.chain2 = chain2
 
-        # hdf5 file to strore data
+        # hdf5 file to store data
         self.hdf5 = self.molgrp.file
         self.try_sparse = try_sparse
 
@@ -218,12 +220,20 @@ class GridTools(object):
     def get_contact_center(self):
         """Get the center of conact atoms."""
 
-        contact_atoms = self.sqldb.get_contact_atoms(
-            cutoff=self.contact_distance, chain1=self.chain1, chain2=self.chain2)
-
         tmp = []
-        for i in contact_atoms.values():
-            tmp.extend(i)
+
+        for ch1, ch2 in itertools.product(self.chain1, self.chain2):
+            contact_atoms = self.sqldb.get_contact_atoms(
+                cutoff=self.contact_distance, chain1=ch1, chain2=ch2)
+            for i in contact_atoms.values():
+                tmp.extend(i)
+
+        # contact_atoms = self.sqldb.get_contact_atoms(
+        #     cutoff=self.contact_distance, chain1=self.chain1, chain2=self.chain2)
+        #
+        # tmp = []
+        # for i in contact_atoms.values():
+        #     tmp.extend(i)
         contact_atoms = list(set(tmp))
 
         # get interface center
@@ -339,8 +349,20 @@ class GridTools(object):
 
         # get the contact atoms
         if only_contact:
-            index = self.sqldb.get_contact_atoms(cutoff=self.contact_distance,
-                chain1=self.chain1, chain2=self.chain2)
+            tmp = dict()
+
+            for ch1, ch2 in itertools.product(self.chain1, self.chain2):
+                contact_atoms = self.sqldb.get_contact_atoms(
+                    cutoff=self.contact_distance, chain1=ch1, chain2=ch2)
+                for chname, contacts in contact_atoms.items():
+                    if chname not in tmp:
+                        tmp[chname] = contacts
+                    else:
+                        tmp[chname] = list(set(contacts + tmp[chname]))
+
+            index = tmp
+            # index = self.sqldb.get_contact_atoms(cutoff=self.contact_distance,
+            #     chain1=self.chain1, chain2=self.chain2)
         else:
             index = {self.chain1: self.sqldb.get('rowID', chainID=self.chain1),
                      self.chain2: self.sqldb.get('rowID', chainID=self.chain2)}
@@ -351,10 +373,18 @@ class GridTools(object):
 
             t0 = time()
 
+            indexA, indexB = [], []
+
+            for ch in self.chain1:
+                indexA += index[ch]
+
+            for ch in self.chain2:
+                indexB += index[ch]
+
             xyzA = np.array(self.sqldb.get(
-                'x,y,z', rowID=index[self.chain1], element=elementtype))
+                'x,y,z', rowID=indexA, element=elementtype))
             xyzB = np.array(self.sqldb.get(
-                'x,y,z', rowID=index[self.chain2], element=elementtype))
+                'x,y,z', rowID=indexB, element=elementtype))
 
             tprocess = time() - t0
 
@@ -650,7 +680,8 @@ class GridTools(object):
                 else:
                     coeff = 1
                 if self.feature_mode == "ind":
-                    chain_name = {self.chain1: '1', self.chain2: '2'}[chain]
+                    chain_name = '1' if set(self.chain1) == set(chain) else '2'
+                    # chain_name = {self.chain1: '1', self.chain2: '2'}[chain]
                     fname = feature_name + "_chain" + chain_name
                 tprocess += time() - t0
 
