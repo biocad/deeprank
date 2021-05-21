@@ -63,10 +63,14 @@ for cplx in tqdm(natives_complexes, total=len(natives_complexes)):
     in_cplx_dir = os.path.join(input_native_dir, cplx)
     out_file = os.path.join(complex_native_dir, f"{cplx_id}.pdb")
     prepared = [os.path.join(in_cplx_dir, f) for f in os.listdir(in_cplx_dir) if f.endswith(NATIVE_SUFFIX)]
-    combine_pdbs_into_complex(prepared[0], prepared[1], out_file)
+    try:
+        combine_pdbs_into_complex(prepared[0], prepared[1], out_file)
+    except IndexError:
+        print(f"Index Error in files {prepared}, complex {cplx}")
+        pass
 
 #check decoys and native and remove if any of them
-resulted_complexes =  os.listdir(output_dir)
+resulted_complexes = os.listdir(output_dir)
 
 for cplx in tqdm(resulted_complexes, total=len(resulted_complexes)):
     if len(os.listdir(os.path.join(output_dir, cplx, "decoys"))) == 0 or len(os.listdir(os.path.join(output_dir, cplx, "native"))) == 0:
