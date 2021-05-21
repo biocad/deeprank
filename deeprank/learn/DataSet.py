@@ -5,6 +5,7 @@ import re
 import sys
 from functools import partial
 import warnings
+import itertools
 
 import h5py
 import numpy as np
@@ -26,6 +27,7 @@ class DataSet():
 
     def __init__(self, train_database, valid_database=None, test_database=None,
                  chain1='A', chain2='B',
+                 chain_mappings=None,
                  mapfly=True, grid_info=None,
                  use_rotation=None,
                  select_feature='all', select_target='DOCKQ',
@@ -154,6 +156,8 @@ class DataSet():
         # chainIDs
         self.chain1 = chain1
         self.chain2 = chain2
+
+        self.chain_mappings = chain_mappings
 
         # pdb selection
         self.use_rotation = use_rotation
@@ -1192,6 +1196,10 @@ class DataSet():
         outtype = 'float32'
         fh5 = h5py.File(fname, 'r')
 
+        _, name = os.path.split(fname)
+        complex_name = os.path.splitext(name)[0]
+        chains1, chains2 = self.chain_mappings[complex_name]
+
         if mol is None:
             mol = list(fh5.keys())[0]
 
@@ -1205,7 +1213,7 @@ class DataSet():
 
             if feat_type == 'AtomicDensities':
                 densities = self.map_atomic_densities(
-                    feat_names, mol_data, grid, npts, angle, axis)
+                    feat_names, mol_data, grid, npts, angle, axis, chains1, chains2)
                 feature += densities
 
             elif feat_type == 'Features':
@@ -1326,7 +1334,7 @@ class DataSet():
         return grid, npts
 
     def map_atomic_densities(
-            self, feat_names, mol_data, grid, npts, angle, axis):
+            self, feat_names, mol_data, grid, npts, angle, axis, chains1, chains2):
         """Map atomic densities.
 
         Args:
@@ -1342,7 +1350,26 @@ class DataSet():
         """
 
         sql = pdb2sql.interface(mol_data['complex'][()])
-        index = sql.get_contact_atoms(chain1=self.chain1, chain2=self.chain2)
+        # index = sql.get_contact_atoms(chain1=self.chain1, chain2=self.chain2)
+        tmp = dict()
+
+        for ch1, ch2 in itertools.product(chains1, chains2):
+            contact_atoms = sql.get_contact_atoms(chain1=ch1, chain2=ch2)
+            for chname, contacts in contact_atoms.items():
+                if chname not in tmp:
+                    tmp[chname] = contacts
+                else:
+                    tmp[chname] = list(set(contacts + tmp[chname]))
+
+        index = tmp
+
+        indexA, indexB = [], []
+
+        for ch in chains1:
+            indexA += index[ch]
+
+        for ch in chains2:
+            indexB += index[ch]
 
         if angle is not None:
             center = [np.mean(g) for g in grid]
@@ -1352,9 +1379,9 @@ class DataSet():
 
             # get pos of the contact atoms of correct type
             xyzA = np.array(sql.get(
-                'x,y,z', rowID=index[self.chain1], element=elementtype))
+                'x,y,z', rowID=indexA, element=elementtype))
             xyzB = np.array(sql.get(
-                'x,y,z', rowID=index[self.chain2], element=elementtype))
+                'x,y,z', rowID=indexB, element=elementtype))
 
             # rotate if necessary
             if angle is not None:

@@ -4,6 +4,7 @@ import itertools
 import pdb2sql
 
 from deeprank.features import FeatureClass
+from deeprank.tools.interface import interface
 
 try:
     import freesasa
@@ -35,11 +36,11 @@ class BSA(FeatureClass):
             >>> bsa.sql._close()
         """
         self.pdb_data = pdb_data
-        self.sql = pdb2sql.interface(pdb_data)
+        self.sql = interface(pdb_data)
         self.chain1 = chain1
         self.chain2 = chain2
         # now each of chain1 and chain2 is list o tuple
-        self.chains_label = [chain1, chain2]
+        self.chains_label = [tuple(chain1), tuple(chain2)]
 
         self.feature_data = {}
         self.feature_data_xyz = {}
@@ -67,7 +68,7 @@ class BSA(FeatureClass):
         for label in self.chains_label:
             self.chains[label] = freesasa.Structure()
             atomdata = self.sql.get(
-                'name,resName,resSeq,chainID,x,y,z', chainID=label)
+                'name,resName,resSeq,chainID,x,y,z', chainID=list(label))
             for atomName, residueName, residueNumber, chainLabel, x, y, z \
                     in atomdata:
                 atomName = '{:>2}'.format(atomName[0])
@@ -88,19 +89,25 @@ class BSA(FeatureClass):
         self.bsa_data = {}
         self.bsa_data_xyz = {}
 
-        ctc_res_all = self.sql.get_contact_residues(cutoff=cutoff, allchains=True)
-        ctc_res = []
-        for c in self.chain1:
-            ctc_res += ctc_res_all[c]
+        ctc_res_list = []
+        for ch1, ch2 in itertools.product(self.chain1, self.chain2):
+            ctc_res = self.sql.get_contact_residues_with_icodes(cutoff=cutoff, chain1=ch1, chain2=ch2)
+            ctc_res_list = list(set(ctc_res_list + ctc_res[ch1] + ctc_res[ch2]))
 
-        for c in self.chain2:
-            ctc_res += ctc_res_all[c]
+
+        # ctc_res_all = self.sql.get_contact_residues_with_icodes(cutoff=cutoff, chain1=self.chain1, chain2=self.chain2)
+        # ctc_res = []
+        # for c in self.chain1:
+        #     ctc_res += ctc_res_all[c]
+        #
+        # for c in self.chain2:
+        #     ctc_res += ctc_res_all[c]
 
         # ctc_res = self.sql.get_contact_residues(cutoff=cutoff, chain1=self.chain1, chain2=self.chain2)
         # ctc_res = ctc_res[self.chain1] + ctc_res[self.chain2]
 
         # handle with small interface or no interface
-        total_res = len(ctc_res)
+        total_res = len(ctc_res_list)
         if total_res == 0:
             raise ValueError(
                 f"No interface residue found with the cutoff {cutoff}Å."
@@ -110,7 +117,7 @@ class BSA(FeatureClass):
                 f"Only {total_res} interface residues found with cutoff"
                 f" {cutoff}Å. Be careful with using the feature BSA")
 
-        for res in ctc_res:
+        for res in ctc_res_list:
 
             # define the selection string and the bsa for the complex
             select_str = ('res, (resi %d) and (chain %s)' % (res[1], res[0]),)
@@ -119,15 +126,18 @@ class BSA(FeatureClass):
 
             # define the selection string and the bsa for the isolated
             select_str = ('res, resi %d' % res[1],)
+
+            chains_key = self.chains_label[0] if res[0] in self.chains_label[0] else self.chains_label[1]
             asa_unbound = freesasa.selectArea(
-                select_str, self.chains[res[0]],
-                self.result_chains[res[0]])['res']
+                select_str, self.chains[chains_key],
+                self.result_chains[chains_key])['res']
 
             # define the bsa
             bsa = asa_unbound - asa_complex
 
             # define the xyz key: (chain,x,y,z)
-            chain = {self.chain1: 0, self.chain2: 1}[res[0]]
+            chain = 0 if res[0] in self.chain1 else 1
+            # chain = {self.chain1: 0, self.chain2: 1}[res[0]]
 
             # get the center
             _, xyz = self.get_residue_center(self.sql, res=res)
