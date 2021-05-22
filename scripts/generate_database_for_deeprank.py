@@ -14,8 +14,8 @@ NATIVE_SUBDIR = 'native'
 input_data_path = sys.argv[1]
 hdf5_out_dir = sys.argv[2]
 
-if os.path.exists(hdf5_out_dir):
-    shutil.rmtree(hdf5_out_dir)
+# if os.path.exists(hdf5_out_dir):
+#     shutil.rmtree(hdf5_out_dir)
 
 def parse_complex_name(cplx_name):
     pdb_id, names = cplx_name.split('_')
@@ -24,10 +24,10 @@ def parse_complex_name(cplx_name):
     return chains1, chains2
 
 
-if not os.path.exists(hdf5_out_dir):
-    os.makedirs(hdf5_out_dir)
+# if not os.path.exists(hdf5_out_dir):
+#     os.makedirs(hdf5_out_dir)
 
-for cplx in tqdm(os.listdir(input_data_path), total=len(os.listdir(input_data_path))):
+for i, cplx in enumerate(tqdm(os.listdir(input_data_path), total=len(os.listdir(input_data_path)))):
     try:
         chains1, chains2 = parse_complex_name(cplx)
         # TBD generate features
@@ -49,6 +49,7 @@ for cplx in tqdm(os.listdir(input_data_path), total=len(os.listdir(input_data_pa
                      'atomic_densities': {'C': 1.7, 'N': 1.55, 'O': 1.52, 'S': 1.8}
                     }
         complex_data.map_features(grid_info, try_sparse=True, prog_bar=True)
+        print(f"generated for {cplx} [{i+1}/{len(os.listdir(input_data_path))}]")
     except Exception:
         continue
 
