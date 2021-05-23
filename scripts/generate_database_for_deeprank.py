@@ -41,7 +41,6 @@ for i, cplx in enumerate(tqdm(os.listdir(input_data_path), total=len(os.listdir(
                                      chain1=chains1,
                                      chain2=chains2,
                                      hdf5=os.path.join(hdf5_out_dir, f"{cplx}.hdf5"),
-                                     data_augmentation=5,
                                      mpi_comm=comm)
         complex_data.create_database(prog_bar=True)
         grid_info = {'number_of_points': [30, 30, 30],
