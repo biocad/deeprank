@@ -67,8 +67,8 @@ def calculate(cplx):
                                      compute_targets=['deeprank.targets.binary_class'],
                                      chain1=chains1,
                                      chain2=chains2,
-                                     hdf5=os.path.join(hdf5_out_dir, f"{cplx}.hdf5"),
-                                     data_augmentation=5)
+                                     hdf5=os.path.join(hdf5_out_dir, f"{cplx}.hdf5"))
+                                     # data_augmentation=5)
         complex_data.create_database(prog_bar=False)
         grid_info = {'number_of_points': [30, 30, 30],
                      'resolution': [1., 1., 1.],
