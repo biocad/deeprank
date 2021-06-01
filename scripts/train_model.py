@@ -10,6 +10,8 @@ from sklearn.model_selection import train_test_split
 import torch
 import random
 
+print("Hello!")
+
 DATABASE_PATH = ""
 
 path_to_hdf5_complexes = sys.argv[1]
