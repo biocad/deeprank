@@ -22,7 +22,7 @@ from deeprank.config import logger
 from deeprank.learn import DataSet, classMetrics, rankingMetrics
 from torch.autograd import Variable
 
-matplotlib.use('agg')
+# matplotlib.use('agg')
 
 
 class NeuralNet():
