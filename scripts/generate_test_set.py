@@ -2,9 +2,8 @@ import random
 import sys
 import os
 
-path_to_hdf5_complexes = sys.argv[1]
-path_to_raw_complexes = sys.argv[2]
-test_size = sys.argv[4]
+path_to_raw_complexes = sys.argv[1]
+test_size = sys.argv[2]
 
 complexes_names = [dirname for dirname in os.listdir(path_to_raw_complexes)]
 
