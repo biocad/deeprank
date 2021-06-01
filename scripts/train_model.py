@@ -8,13 +8,15 @@ import h5py
 from tqdm import tqdm
 from sklearn.model_selection import train_test_split
 import torch
+import random
 
 DATABASE_PATH = ""
 
 path_to_hdf5_complexes = sys.argv[1]
 path_to_raw_complexes = sys.argv[2]
 name_of_output_file = sys.argv[3]
-NUM_WORKERS = sys.argv[4]
+NUM_WORKERS = int(sys.argv[4])
+TEST_COMPLEXES_FILE = 'test_complexes.txt'
 
 
 def parse_complex_name(cplx_name):
@@ -24,8 +26,13 @@ def parse_complex_name(cplx_name):
     return chains1, chains2
 
 
+with open(TEST_COMPLEXES_FILE, 'r') as f:
+    test_names = [cplx.strip() for cplx in f.readlines()]
+
+test_names_set = set(test_names)
+
 database = [os.path.join(path_to_hdf5_complexes, f) for f in os.listdir(path_to_hdf5_complexes) \
-            if not f.endswith(".pckl")]
+            if not f.endswith(".pckl") and not f[:-5] in test_names_set]
 
 complexes_names = [dirname for dirname in os.listdir(path_to_raw_complexes)]
 
