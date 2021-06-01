@@ -11,4 +11,4 @@ test_complexes_names = random.sample(complexes_names, int(test_size * len(comple
 
 with open('test_complexes.txt', 'w') as f:
     for line in test_complexes_names:
-        f.write(line)
+        f.write(line + '\n')
