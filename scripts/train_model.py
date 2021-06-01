@@ -4,11 +4,17 @@ from deeprank.learn.model3d import cnn_class
 import sys
 import os
 import numpy as np
+import h5py
+from tqdm import tqdm
+from sklearn.model_selection import train_test_split
+import torch
 
 DATABASE_PATH = ""
 
 path_to_hdf5_complexes = sys.argv[1]
 path_to_raw_complexes = sys.argv[2]
+name_of_output_file = sys.argv[3]
+NUM_WORKERS = sys.argv[4]
 
 
 def parse_complex_name(cplx_name):
@@ -18,19 +24,36 @@ def parse_complex_name(cplx_name):
     return chains1, chains2
 
 
-database = [os.path.join(path_to_hdf5_complexes, f) for f in os.listdir(path_to_hdf5_complexes)]
+database = [os.path.join(path_to_hdf5_complexes, f) for f in os.listdir(path_to_hdf5_complexes) \
+            if not f.endswith(".pckl")]
+
 complexes_names = [dirname for dirname in os.listdir(path_to_raw_complexes)]
 
-chains_dict = {cplx : (parse_complex_name(cplx)) for cplx in complexes_names}
+near_native = 0
+total = 0
+
+for cplx in tqdm(database, total=len(database)):
+    if cplx.endswith('.hdf5'):
+        h5 = h5py.File(cplx, 'r')
+        for mol in h5.keys():
+            near_native += h5[mol]['targets']['BIN_CLASS'][()]
+            total += 1
+
+print(f"near-native poses: {near_native / total}")
+weight0 = near_native / total
+weight1 = 1 - weight0
+
+chains_dict = {cplx: (parse_complex_name(cplx)) for cplx in complexes_names}
 
 grid_info = {'number_of_points': [30, 30, 30],
-                     'resolution': [1., 1., 1.],
-                     'atomic_densities': {'C': 1.7, 'N': 1.55, 'O': 1.52, 'S': 1.8}
-                     }
+             'resolution': [1., 1., 1.],
+             'atomic_densities': {'C': 1.7, 'N': 1.55, 'O': 1.52, 'S': 1.8}
+             }
 
-data_set = DataSet(train_database=database,
-                   valid_database=None,
-                   test_database=None,
+train_database, testvalid_database = train_test_split(database, test_size=0.1)
+
+data_set = DataSet(train_database=train_database,
+                   valid_database=testvalid_database,
                    grid_shape=(30, 30, 30),
                    grid_info=grid_info,
                    select_target='BIN_CLASS',
@@ -43,9 +66,11 @@ data_set = DataSet(train_database=database,
 model = NeuralNet(data_set=data_set,
                   model=cnn_class,
                   model_type='3d',
-                  task='class')
+                  task='class',
+                  class_weights=torch.FloatTensor([weight0, weight1]).cuda(),
+                  cuda=True)
 
-model.train(nepoch=5,
-            train_batch_size=5,
-            num_workers=1,
-            hdf5='train_example')
+model.train(nepoch=50,
+            train_batch_size=32,
+            num_workers=NUM_WORKERS,
+            hdf5=name_of_output_file)
