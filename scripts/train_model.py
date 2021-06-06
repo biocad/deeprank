@@ -1,5 +1,4 @@
 from deeprank.learn import DataSet, NeuralNet
-from deeprank.learn.modelGenerator import *
 from deeprank.learn.model3d import cnn_class
 import sys
 import os
@@ -18,6 +17,8 @@ path_to_hdf5_complexes = sys.argv[1]
 path_to_raw_complexes = sys.argv[2]
 name_of_output_file = sys.argv[3]
 NUM_WORKERS = int(sys.argv[4])
+BATCH_SIZE = int(sys.argv[5])
+OUTDIR = sys.argv[6]
 TEST_COMPLEXES_FILE = 'test_complexes.txt'
 
 
@@ -77,9 +78,11 @@ model = NeuralNet(data_set=data_set,
                   model_type='3d',
                   task='class',
                   class_weights=torch.FloatTensor([weight0, weight1]).cuda(),
-                  cuda=True)
+                  cuda=True,
+                  outdir=OUTDIR)
 
 model.train(nepoch=50,
-            train_batch_size=32,
+            train_batch_size=BATCH_SIZE,
             num_workers=NUM_WORKERS,
-            hdf5=name_of_output_file)
+            hdf5=name_of_output_file,
+            save_epoch='all')
