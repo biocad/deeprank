@@ -20,6 +20,8 @@ OUTDIR = sys.argv[6]
 TEST_COMPLEXES_FILE = 'test_complexes.txt'
 
 
+
+
 def parse_complex_name(cplx_name):
     pdb_id, names = cplx_name.split('_')
     first_names, second_names = names.split('|')
@@ -37,18 +39,14 @@ database = [os.path.join(path_to_hdf5_complexes, f) for f in os.listdir(path_to_
 
 complexes_names = [dirname for dirname in os.listdir(path_to_raw_complexes)]
 
-near_native = 0
-total = 0
+# for cplx in tqdm(database, total=len(database)):
+#     if cplx.endswith('.hdf5'):
+#         h5 = h5py.File(cplx, 'r')
+#         for mol in h5.keys():
+#             near_native += h5[mol]['targets']['BIN_CLASS'][()]
+#             total += 1
 
-for cplx in tqdm(database, total=len(database)):
-    if cplx.endswith('.hdf5'):
-        h5 = h5py.File(cplx, 'r')
-        for mol in h5.keys():
-            near_native += h5[mol]['targets']['BIN_CLASS'][()]
-            total += 1
-
-print(f"near-native poses: {near_native / total}")
-weight0 = near_native / total
+weight0 = 0.17810567405956226
 weight1 = 1 - weight0
 
 chains_dict = {cplx: (parse_complex_name(cplx)) for cplx in complexes_names}
