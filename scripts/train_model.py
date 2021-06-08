@@ -9,8 +9,6 @@ from sklearn.model_selection import train_test_split
 import torch
 import random
 
-print("Hello!")
-
 DATABASE_PATH = ""
 
 path_to_hdf5_complexes = sys.argv[1]
@@ -71,7 +69,8 @@ data_set = DataSet(train_database=train_database,
                    normalize_targets=False,
                    pair_chain_feature=np.add,
                    chain_mappings=chains_dict,
-                   mapfly=False)
+                   mapfly=False,
+                   use_rotation=4)
 
 model = NeuralNet(data_set=data_set,
                   model=cnn_class,
