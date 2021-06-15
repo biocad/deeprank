@@ -78,8 +78,8 @@ model = NeuralNet(data_set=data_set,
                   cuda=True,
                   outdir=OUTDIR)
 
-model.train(nepoch=50,
+model.train(nepoch=10,
             train_batch_size=BATCH_SIZE,
             num_workers=NUM_WORKERS,
-            hdf5=name_of_output_file,
-            save_epoch='all')
+            hdf5=name_of_output_file)
+
