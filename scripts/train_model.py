@@ -76,7 +76,8 @@ model = NeuralNet(data_set=data_set,
                   task='class',
                   class_weights=torch.FloatTensor([weight0, weight1]).cuda(),
                   cuda=True,
-                  outdir=OUTDIR)
+                  outdir=OUTDIR,
+                  save_hitrate=False)
 
 model.train(nepoch=10,
             train_batch_size=BATCH_SIZE,
