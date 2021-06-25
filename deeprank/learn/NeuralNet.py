@@ -244,10 +244,11 @@ class NeuralNet():
             # https://pytorch.org/docs/stable/nn.html#torch.nn.DataParallel
             if self.state['cuda']:
                 for paramname in list(self.state['state_dict'].keys()):
-                    paramname_new = paramname.lstrip('module.')
-                    self.state['state_dict'][paramname_new] = \
-                        self.state['state_dict'][paramname]
-                    del self.state['state_dict'][paramname]
+                    if paramname.startswith('module.'):
+                        paramname_new = paramname.lstrip('module.')
+                        self.state['state_dict'][paramname_new] = \
+                            self.state['state_dict'][paramname]
+                        del self.state['state_dict'][paramname]
             self.load_model_params()
 
         # multi-gpu
