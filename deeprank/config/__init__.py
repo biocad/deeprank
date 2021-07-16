@@ -12,7 +12,7 @@ DEBUG = False
 
 # Default logger
 logging.config.dictConfig(logger_settings.DEFAULT_LOGGING)
-logger = logging.getLogger('deeprank')
+logger = logging.getLogger('deeprank_file')
 
 # Default PSSM path
 PATH_PSSM_SOURCE = None

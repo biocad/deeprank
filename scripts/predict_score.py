@@ -1,3 +1,6 @@
+import logging
+logging.basicConfig(filename='example.log', level=logging.DEBUG)
+
 from deeprank.learn import DataSet, NeuralNet
 from deeprank.learn.model3d import cnn_class
 from deeprank.generate import *
@@ -14,7 +17,7 @@ import numpy as np
 import sys
 import os
 import shutil
-
+import warnings
 
 class DataSetForPretrainedModel(DataSet):
     def __init__(self, *args, **kwargs):
@@ -143,6 +146,8 @@ def parse_complex_name(cplx_name):
 
 
 def main():
+    warnings.filterwarnings("ignore")
+
     PATH_TO_COMPLEX = sys.argv[1]
     PATH_TO_MODEL = sys.argv[2]
     # POSES_COUNT = sys.argv[3]

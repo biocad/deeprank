@@ -44,11 +44,19 @@ DEFAULT_LOGGING = {
             'class': 'logging.StreamHandler',
             'stream': 'ext://sys.stderr',
         },
+        'file' : {
+            'filename': 'deeprank.log',
+            'formatter': 'precise',
+            'class' : 'logging.handlers.RotatingFileHandler'
+        }
     },
     'loggers': {
         'deeprank': {
             'handlers': ['stdout', 'stderr', 'debug'],
             'level': 'DEBUG',
         },
+        'deeprank_file' : {
+            'handlers' : ['file'],
+        }
     }
 }
