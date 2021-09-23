@@ -13,3 +13,8 @@ def __compute_target__(decoy, targrp, chains1, chains2):
         warnings.warn(f"Removed old {tarname} from {molname}")
 
     targrp.create_dataset('BIN_CLASS', data=np.array(1))
+
+def __compute_target_ram__(decoy, targrp, chains1, chains2):
+    tarname = 'BIN_CLASS'
+
+    targrp[tarname] = np.array(1)

@@ -974,6 +974,28 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, chains1, chains2):
     # close
     atfeat.sqldb._close()
 
+def __compute_feature_ram__(pdb_data, featgrp, featgrp_raw, chains1, chains2):
+    path = os.path.dirname(os.path.realpath(__file__))
+    FF = path + '/forcefield/'
+
+    atfeat = AtomicFeature(pdb_data,
+                           chains1=chains1,
+                           chains2=chains2,
+                           param_charge=FF + 'protein-allhdg5-4_new.top',
+                           param_vdw=FF + 'protein-allhdg5-4_new.param',
+                           patch_file=FF + 'patch.top')
+
+    atfeat.assign_parameters()
+
+    # only compute the pair interactions here
+    atfeat.evaluate_pair_interaction(print_interactions=False)
+
+    # compute the charges
+    # here we extend the contact atoms to
+    # entire residue containing at least 1 contact atom
+    atfeat.evaluate_charges(extend_contact_to_residue=True)
+
+    return atfeat.feature_data, atfeat.feature_data_xyz
 
 ########################################################################
 #

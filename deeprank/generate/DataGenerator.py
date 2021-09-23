@@ -1761,3 +1761,444 @@ class DataGenerator(object):
 
                 # put back the data
                 molgrp['features/' + fn][:, 1:4] = xyz_rot
+
+class DataGeneratorRAM(DataGenerator):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.data_dict = dict()
+
+    def create_database(
+            self,
+            verbose=False,
+            remove_error=True,
+            prog_bar=False,
+            contact_distance=8.5,
+            random_seed=None):
+
+        # here we construct the same as in Datagenerator, but only use RAM
+
+        # check decoy pdb files
+        if not self.pdb_path:
+            raise ValueError(f"Decoy pdb files not found. Check class "
+                             f"parameters 'pdb_source' and 'pdb_select'.")
+
+        self.local_pdbs = self.pdb_path
+
+        if self.mpi_comm is not None:
+            rank = self.mpi_comm.Get_rank()
+            size = self.mpi_comm.Get_size()
+        else:
+            size = 1
+
+        if size > 1:
+            if rank == 0:
+                pdbs = [self.pdb_path[i::size] for i in range(size)]
+                self.local_pdbs = pdbs[0]
+                # send to other procs
+                for iP in range(1, size):
+                    self.mpi_comm.send(pdbs[iP], dest=iP, tag=11)
+            else:
+                # receive procs
+                self.local_pdbs = self.mpi_comm.recv(source=0, tag=11)
+            # change hdf5 name
+            h5path, h5name = os.path.split(self.hdf5)
+            self.hdf5 = os.path.join(h5path, f"{rank:03d}_{h5name}")
+
+        self.data_dict['pdb_source'] = [
+            os.path.abspath(f) for f in self.pdb_source]
+        self.data_dict['pdb_native'] = [
+            os.path.abspath(f) for f in self.pdb_native]
+        self.data_dict['pssm_source'] = os.path.abspath(
+            self.pssm_source)
+        if self.compute_features is not None:
+            self.data_dict['features'] = self.compute_features
+        if self.compute_targets is not None:
+            self.data_dict['targets'] = self.compute_targets
+        self.logger.info(
+            f'\n# Start creating HDF5 database: {self.hdf5}')
+
+        # get the local progress bar
+        desc = '{:25s}'.format('Creating database')
+        cplx_tqdm = tqdm(self.local_pdbs, desc=desc,
+                         disable=not prog_bar)
+
+        for cplx in cplx_tqdm:
+
+            cplx_tqdm.set_postfix(mol=os.path.basename(cplx))
+            self.logger.info(f'\nProcessing PDB file: {cplx}')
+
+            # names of the molecule
+            mol_name = os.path.splitext(os.path.basename(cplx))[0]
+            mol_aug_name_list = []
+
+            try:
+
+                ################################################
+                #   get the pdbs of the conformation and its ref
+                #   for the original data (not augmented one)
+                ################################################
+
+                if verbose:
+                    self.logger.info(
+                        f'\nMolecule: {mol_name}.'
+                        f'\nStart generating top HDF5 group "{mol_name}"...'
+                        f'\n{"":4s}Reading PDB data into database...')
+
+                # get the bare name of the molecule
+                # and define the name of the native
+                # i.e. 1AK4_100w -> 1AK4
+                #TODO Исправить
+                bare_mol_name = mol_name.split('_')[0]
+                ref_name = bare_mol_name + '.pdb'
+
+                # check if we have a decoy or native
+                # and find the reference
+                if mol_name == bare_mol_name:
+                    ref = cplx
+                else:
+                    if len(self.all_native) > 0:
+                        ref = list(
+                            filter(lambda x: ref_name in x, self.all_native))
+                        if len(ref) == 0:
+                            raise ValueError('Native not found')
+                        else:
+                            if len(ref) > 1:
+                                warnings.warn(
+                                    f'Multiple native reference found, here used {ref[0]}')
+                            ref = ref[0]
+                        if ref == '':
+                            ref = None
+                    else:
+                        ref = None
+
+                # crete a subgroup for the molecule
+                # TODO make it dict-like
+                self.data_dict[mol_name] = dict()
+                molgrp = self.data_dict[mol_name]
+                self.data_dict[mol_name]['type'] = 'molecule'
+
+                # add the ref and the complex
+                self._add_pdb(molgrp, cplx, 'complex')
+                if ref is not None:
+                    self._add_pdb(molgrp, ref, 'native')
+
+                if verbose:
+                    self.logger.info(
+                        f'{"":4s}Generated subgroup "complex"'
+                        f' to store pdb data of the current model.')
+                    if ref:
+                        self.logger.info(
+                            f'{"":4s}Generated subgroup "native"'
+                            f' to store pdb data of the reference molecule.')
+
+                ################################################
+                #   add the features
+                ################################################
+                feature_error_flag = False  # when False: success; when True: failed
+
+                if self.compute_features is not None:
+                    if verbose:
+                        self.logger.info(
+                            f'{"":4s}Calculating features...')
+
+                    # molgrp.require_group('features')
+                    molgrp['features'] = dict()
+                    # molgrp.require_group('features_raw')
+                    molgrp['features_raw'] = dict()
+
+                    feature_error_flag = self._compute_features(self.compute_features,
+                                                                molgrp['complex'],
+                                                                molgrp['features'],
+                                                                molgrp['features_raw'],
+                                                                self.chain1,
+                                                                self.chain2,
+                                                                self.logger)
+                    if feature_error_flag:
+                        self.feature_error += [mol_name]
+                        # ignore the targets/grid/augmentation computation
+                        # and directly go to next molecule. Remove errored
+                        # molecule later.
+                        # Otherwise, keep computing and report errored mol.
+                        if remove_error:
+                            continue
+
+                    if verbose:
+                        if not feature_error_flag or not remove_error:
+                            self.logger.info(
+                                f'\n{"":4s}Generated subgroup "features"'
+                                f' to store xyz-based feature values.'
+                                f'{"":4s}Generated subgroup "features_raw"'
+                                f' to store human read feature values')
+
+                ################################################
+                #   add the targets
+                ################################################
+                if self.compute_targets is not None:
+                    if verbose:
+                        self.logger.info(
+                            f'{"":4s}Calculating targets...')
+
+                    # molgrp.require_group('targets')
+                    molgrp['targets'] = dict()
+
+                    self._compute_targets(self.compute_targets,
+                                          molgrp['complex'],
+                                          molgrp['targets'],
+                                          self.chain1,
+                                          self.chain2)
+
+                    if verbose:
+                        self.logger.info(
+                            f'{"":4s}Generated subgroup "targets" '
+                            f'to store targets, such as BIN_CLASS, dockQ, etc.')
+
+                ################################################
+                #   add the box center
+                ################################################
+                if verbose:
+                    self.logger.info(
+                        f'{"":4s}Calculating grid box center...')
+
+                grid_error_flag = False
+                # molgrp.require_group('grid_points')
+                molgrp['grid_points'] = dict()
+
+
+                try:
+                    center = self._get_grid_center(
+                        molgrp['complex'], contact_distance)
+                    molgrp['grid_points']['center'] = center
+                        # 'center', data=center)
+                    if verbose:
+                        self.logger.info(
+                            f'{"":4s}Generated subgroup "grid_points"'
+                            f' to store grid box center.')
+                except ValueError as ex:
+                    grid_error_flag = True
+                    self.grid_error += [mol_name]
+                    self.logger.exception(ex)
+                    if remove_error:
+                        continue
+                #
+                # ################################################
+                # #   DATA AUGMENTATION
+                # ################################################
+                #
+                # # GET ALL THE NAMES
+                # if self.data_augmentation is not None:
+                #     mol_aug_name_list = [
+                #         mol_name +
+                #         '_r%03d' %
+                #         (idir +
+                #          1) for idir in range(
+                #             self.data_augmentation)]
+                # else:
+                #     mol_aug_name_list = []
+                #
+                # if verbose and mol_aug_name_list:
+                #     self.logger.info(
+                #         f'{"":2s}Start augmenting data'
+                #         f' with {self.data_augmentation} times...')
+                #
+                # # loop over the complexes
+                # for mol_aug_name in mol_aug_name_list:
+                #
+                #     # crete a subgroup for the molecule
+                #     molgrp = self.f5.require_group(mol_aug_name)
+                #     molgrp.attrs['type'] = 'molecule'
+                #
+                #     # copy the ref into it
+                #     if ref is not None:
+                #         self._add_pdb(molgrp, ref, 'native')
+                #
+                #     # get the rotation axis and angle
+                #     if self.align is None:
+                #         axis, angle = pdb2sql.transform.get_rot_axis_angle(
+                #             random_seed)
+                #     else:
+                #         axis, angle = self._get_aligned_rotation_axis_angle(random_seed,
+                #                                                             self.align)
+                #
+                #     # create the new pdb and get molecule center
+                #     # molecule center is the origin of rotation)
+                #     mol_center = self._add_aug_pdb(
+                #         molgrp, cplx, 'complex', axis, angle)
+                #
+                #     # copy the targets/features
+                #     if 'targets' in self.f5[mol_name]:
+                #         self.f5.copy(mol_name + '/targets/', molgrp)
+                #     self.f5.copy(mol_name + '/features/', molgrp)
+                #
+                #     # rotate the feature
+                #     self._rotate_feature(
+                #         molgrp, axis, angle, mol_center)
+                #
+                #     # grid center used to create grid box
+                #     molgrp.require_group('grid_points')
+                #     center = pdb2sql.transform.rot_xyz_around_axis(
+                #         self.f5[mol_name + '/grid_points/center'],
+                #         axis, angle, mol_center)
+                #
+                #     molgrp['grid_points'].create_dataset(
+                #         'center', data=center)
+                #
+                #     # store the rotation axis/angl/center as attriutes
+                #     # in case we need them later
+                #     molgrp.attrs['axis'] = axis
+                #     molgrp.attrs['angle'] = angle
+                #     molgrp.attrs['center'] = mol_center
+                #
+                # # cache aug mols if original mol has errored features
+                # if feature_error_flag:
+                #     self.feature_error += mol_aug_name_list
+                # if grid_error_flag:
+                #     self.grid_error += mol_aug_name_list
+                #
+                # if verbose and mol_aug_name_list:
+                #     self.logger.info(
+                #         f'{"":2s}Completed data augmentation'
+                #         f' and generated top HDF5 groups, e.g. {mol_aug_name}.')
+
+                ################################################
+                # Successul message
+                ################################################
+                if verbose:
+                    self.logger.info(
+                        f'\nSuccessfully generated top HDF5 group "{mol_name}".\n')
+
+            # all other errors
+            except BaseException:
+                raise
+
+        ##################################################
+        # Post processing
+        ##################################################
+        #  Remove errored molecules
+        errored_mol = list(set(self.feature_error + self.grid_error))
+        if errored_mol:
+            if remove_error:
+                for mol in errored_mol:
+                    del self.f5[mol]
+                if self.feature_error:
+                    self.logger.info(
+                        f'Molecules with errored features are removed:'
+                        f'\n{self.feature_error}')
+                if self.grid_error:
+                    self.logger.info(
+                        f'Molecules with errored grid points are removed:'
+                        f'\n{self.grid_error}')
+            else:
+                if self.feature_error:
+                    self.logger.warning(
+                        f'The following molecules have errored features:'
+                        f'\n{self.feature_error}')
+                if self.grid_error:
+                    self.logger.warning(
+                        f'The following molecules have errored grid points:'
+                        f'\n{self.grid_error}')
+
+        # close the file
+        # self.f5.close()
+        self.logger.info(
+            f'\n# Successfully created database: {self.hdf5}\n')
+
+    def _add_pdb(self, molgrp, pdbfile, name):
+        """Add a pdb to a molgrp.
+
+                Args:
+                    # molgrp (str): mopl group where tp add the pdb
+                    pdbfile (str): psb file to add
+                    name (str): dataset name in the hdf5 molgroup
+                """
+
+        # no alignement
+        if self.align is None:
+            # read the pdb and extract the ATOM lines
+            with open(pdbfile, 'r') as fi:
+                data = [line.split('\n')[0]
+                        for line in fi if line.startswith('ATOM')]
+
+        # some alignement
+        elif isinstance(self.align, dict):
+
+            sqldb = self._get_aligned_sqldb(pdbfile, self.align)
+            data = sqldb.sql2pdb()
+
+        #  PDB default line length is 80
+        #  http://www.wwpdb.org/documentation/file-format
+        data = np.array(data).astype('|S78')
+        molgrp[name] = data
+
+    @staticmethod
+    def _compute_features(feat_list, pdb_data, featgrp, featgrp_raw, chain1, chain2, logger):
+        """Compute the features.
+
+        Args:
+            feat_list (list(str)): list of function name, e.g.,
+                ['deeprank.features.ResidueDensity',
+                'deeprank.features.PSSM_IC']
+            pdb_data (bytes): PDB translated in bytes
+            featgrp (str): name of the group where to store the xyz feature
+            featgrp_raw (str): name of the group where to store the raw feature
+            chain1 (str): First chain ID
+            chain2 (str): Second chain ID
+            logger (logger): name of logger object
+
+        Return:
+            bool: error happened or not
+        """
+        error_flag = False  # when False: success; when True: failed
+        for feat in feat_list:
+            try:
+                feat_module = importlib.import_module(feat, package=None)
+                feature_raw, feature = feat_module.__compute_feature_ram__(pdb_data, featgrp, featgrp_raw,
+                                                chain1, chain2)
+
+                for name, data in feature.items():
+                    ds = np.array([list(key) + value for key, value in data.items()])
+                    featgrp[name] = ds
+
+                for name, data in feature_raw.items():
+                    ds = []
+                    for key, value in data.items():
+                        if len(key) == 3:
+                            feat = '{:>4}{:>10}{:>10}'.format(key[0], key[1], key[2])
+                        elif len(key) == 4:
+                            feat = '{:>4}{:>10}{:>10}{:>10}'.format(
+                                key[0], key[1], key[2], key[3])
+
+                        for v in value:
+                            feat += '    {: 1.6E}'.format(v)
+
+                        ds.append(feat)
+
+                    if ds:
+                        ds = np.array(ds).astype('|S' + str(len(ds[0])))
+                    else:
+                        ds = np.array(ds)
+
+                    featgrp[f"{name}_raw"] = ds
+
+
+
+            except Exception as ex:
+                logger.exception(ex)
+                error_flag = True
+
+        return error_flag
+
+    @staticmethod
+    def _compute_targets(targ_list, pdb_data, targrp, chains1, chains2):
+        """Compute the targets.
+
+        Args:
+            targ_list (list(str)): list of function name
+            pdb_data (bytes): PDB translated in btes
+            targrp (str): name of the group where to store the targets
+            logger (logger): name of logger object
+        """
+        for targ in targ_list:
+            targ_module = importlib.import_module(targ, package=None)
+            targ_module.__compute_target_ram__(pdb_data, targrp, chains1, chains2)
+
