@@ -2178,7 +2178,7 @@ class DataGeneratorRAM(DataGenerator):
                     else:
                         ds = np.array(ds)
 
-                    featgrp[f"{name}_raw"] = ds
+                    featgrp_raw[f"{name}_raw"] = ds
 
 
 
@@ -2201,4 +2201,201 @@ class DataGeneratorRAM(DataGenerator):
         for targ in targ_list:
             targ_module = importlib.import_module(targ, package=None)
             targ_module.__compute_target_ram__(pdb_data, targrp, chains1, chains2)
+
+
+    def map_features(self, grid_info={},
+                     cuda=False, gpu_block=None,
+                     cuda_kernel='kernel_map.c',
+                     cuda_func_name='gaussian',
+                     try_sparse=True,
+                     reset=False, use_tmpdir=False,
+                     time=False,
+                     prog_bar=True, grid_prog_bar=False,
+                     remove_error=True):
+        """Map the feature on a grid of points centered at the interface.
+
+        If features to map are not given, they will be are automatically
+        determined for each molecule. Otherwise, given features will be mapped
+        for all molecules (i.e. existing mapped features will be recalculated).
+
+        Args:
+            grid_info (dict): Informaton for the grid.
+                See deeprank.generate.GridTools.py for details.
+            cuda (bool, optional): Use CUDA
+            gpu_block (None, optional): GPU block size to be used
+            cuda_kernel (str, optional): filename containing CUDA kernel
+            cuda_func_name (str, optional): The name of the function in the kernel
+            try_sparse (bool, optional): Try to save the grids as sparse format
+            reset (bool, optional): remove grids if some are already present
+            use_tmpdir (bool, optional): use a scratch directory
+            time (bool, optional): time the mapping process
+            prog_bar (bool, optional): use tqdm for each molecule
+            grid_prog_bar (bool, optional): use tqdm for each grid
+            remove_error (bool, optional): remove the data that errored
+
+        Example:
+
+        >>> #init the data assembler
+        >>> database = DataGenerator(hdf5='1ak4.hdf5')
+        >>>
+        >>> # map the features
+        >>> grid_info = {
+        >>>     'number_of_points': [30,30,30],
+        >>>     'resolution': [1.,1.,1.],
+        >>>     'atomic_densities': {'C':1.7, 'N':1.55, 'O':1.52, 'S':1.8},
+        >>> }
+        >>>
+        >>> database.map_features(grid_info,try_sparse=True,time=False,prog_bar=True)
+        """
+
+        # default CUDA
+        cuda_func = None
+        cuda_atomic = None
+
+        # disable CUDA when using MPI
+        if self.mpi_comm is not None:
+            if self.mpi_comm.Get_size() > 1:
+                if cuda:
+                    self.logger.warning(
+                        'CUDA mapping disabled when using MPI')
+                    cuda = False
+
+        # name of the hdf5 file
+        # f5 = h5py.File(self.hdf5, 'a')
+
+
+        # check all the input PDB files
+        #TODO fix keys in data_dict; keys() contain not only
+        mol_names = self.data_dict.keys()
+        # mol_names = self.data_dict[]
+
+        if len(mol_names) == 0:
+            # f5.close()
+            raise ValueError(f'No molecules found in data dict.')
+
+        ################################################################
+        # Check grid_info
+        ################################################################
+        # fills in the grid data if not provided: default = NONE
+        grid_info_ref = copy.deepcopy(grid_info)
+        grinfo = ['number_of_points', 'resolution']
+        for gr in grinfo:
+            if gr not in grid_info:
+                grid_info[gr] = None
+
+        # by default we do not map atomic densities
+        if 'atomic_densities' not in grid_info:
+            grid_info['atomic_densities'] = None
+
+        # fills in the features mode if somes are missing: default = IND
+        modes = ['atomic_densities_mode', 'feature_mode']
+        for m in modes:
+            if m not in grid_info:
+                grid_info[m] = 'ind'
+
+        ################################################################
+        #
+        ################################################################
+        # sanity check for cuda
+        if cuda and gpu_block is None:  # pragma: no cover
+            self.logger.info(
+                f'GPU block automatically set to 8 x 8 x 8. '
+                f'You can set block size with gpu_block=[n,m,k]')
+            gpu_block = [8, 8, 8]
+
+        # initialize cuda
+        if cuda:  # pragma: no cover
+
+            # compile cuda module
+            npts = grid_info['number_of_points']
+            res = grid_info['resolution']
+            module = self._compile_cuda_kernel(cuda_kernel, npts, res)
+
+            # get the cuda function for the atomic/residue feature
+            cuda_func = self._get_cuda_function(
+                module, cuda_func_name)
+
+            # get the cuda function for the atomic densties
+            cuda_atomic_name = 'atomic_densities'
+            cuda_atomic = self._get_cuda_function(
+                module, cuda_atomic_name)
+
+        # get the local progress bar
+        desc = '{:25s}'.format('Map Features')
+        mol_tqdm = tqdm(mol_names, desc=desc, disable=not prog_bar)
+
+        if not prog_bar:
+            self.logger.info(f'{desc}: {self.hdf5}')
+
+        # loop over the data files
+        for mol in mol_tqdm:
+            mol_tqdm.set_postfix(mol=mol)
+
+            # Determine which feature to map
+            # if feature not given, then determine it for each molecule
+            if 'feature' not in grid_info_ref:
+                # if we havent mapped anything yet or if we reset
+                if 'mapped_features' not in list(self.data_dict[mol].keys()) or reset:
+                    grid_info['feature'] = list(
+                        self.data_dict[mol]['features'].keys())
+
+                # if we have already mapped stuff
+                elif 'mapped_features' in list(self.data_dict[mol].keys()):
+
+                    # feature name
+                    all_feat = list(self.data_dict[mol]['features'].keys())
+
+                    # feature already mapped
+                    mapped_feat = list(
+                        self.data_dict[mol]['mapped_features']['Feature_ind'].keys())
+
+                    # we select only the feture that were not mapped yet
+                    grid_info['feature'] = []
+                    for feat_name in all_feat:
+                        if not any(map(lambda x: x.startswith(feat_name + '_'),
+                                       mapped_feat)):
+                            grid_info['feature'].append(feat_name)
+
+            try:
+                # compute the data we want on the grid
+                #TODO ahhh here we go again
+                gt.GridTools(
+                    molgrp=f5[mol],
+                    chain1=self.chain1,
+                    chain2=self.chain2,
+                    number_of_points=grid_info['number_of_points'],
+                    resolution=grid_info['resolution'],
+                    atomic_densities=grid_info['atomic_densities'],
+                    atomic_densities_mode=grid_info['atomic_densities_mode'],
+                    feature=grid_info['feature'],
+                    feature_mode=grid_info['feature_mode'],
+                    cuda=cuda,
+                    gpu_block=gpu_block,
+                    cuda_func=cuda_func,
+                    cuda_atomic=cuda_atomic,
+                    time=time,
+                    prog_bar=grid_prog_bar,
+                    try_sparse=try_sparse)
+
+            except BaseException:
+                self.map_error.append(mol)
+                self.logger.exception(
+                    f'Error during the mapping of {mol}')
+
+        # remove the molecule with issues
+        if self.map_error:
+            if remove_error:
+                for mol in self.map_error:
+                    del f5[mol]
+                self.logger.warning(
+                    f"Molecules with errored feature mapping are removed:\n"
+                    f"{self.map_error}")
+            else:
+                self.logger.warning(
+                    f"The following moleclues have errored feature mapping:\n"
+                    f"{self.map_error}")
+
+        # close he hdf5 file
+        # f5.close()
+
 
