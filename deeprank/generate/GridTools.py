@@ -896,3 +896,227 @@ class GridTools(object):
                     compression='gzip', compression_opts=9)
 
 ########################################################################
+
+
+class GridToolsRAM(GridTools):
+    def __init__(self, molgrp, chain1, chain2,
+                 number_of_points=30, resolution=1.,
+                 atomic_densities=None, atomic_densities_mode='ind',
+                 feature=None, feature_mode='ind',
+                 contact_distance=8.5,
+                 cuda=False, gpu_block=None, cuda_func=None, cuda_atomic=None,
+                 prog_bar=False, time=False, try_sparse=True):
+
+        # mol and hdf5 file
+        self.molgrp = molgrp
+        self.mol_basename = molgrp['name']
+
+        # chain IDs
+        self.chain1 = chain1
+        self.chain2 = chain2
+
+        # hdf5 file to store data
+        # we have no file, thats why self.hdf5 is a dict
+        self.hdf5 = self.molgrp
+        self.try_sparse = try_sparse
+
+        # parameter of the grid
+        if number_of_points is not None:
+            if not isinstance(number_of_points, list):
+                number_of_points = [number_of_points] * 3
+            self.npts = np.array(number_of_points).astype('int')
+
+        if resolution is not None:
+            if not isinstance(resolution, list):
+                resolution = [resolution] * 3
+            self.res = np.array(resolution)
+
+        # feature requested
+        self.atomic_densities = atomic_densities
+        self.feature = feature
+
+        # mapping mode
+        self.feature_mode = feature_mode
+        self.atomic_densities_mode = atomic_densities_mode
+
+        # cuda support
+        self.cuda = cuda
+        if self.cuda:  # pragma: no cover
+            self.gpu_block = gpu_block
+            self.gpu_grid = [int(np.ceil(n / b))
+                             for b, n in zip(self.gpu_block, self.npts)]
+
+        # cuda
+        self.cuda_func = cuda_func
+        self.cuda_atomic = cuda_atomic
+
+        # parameter of the atomic system
+        self.atom_xyz = None
+        self.atom_index = None
+        self.atom_type = None
+
+        # grid points
+        self.x = None
+        self.y = None
+        self.z = None
+
+        # grids for calculation of atomic densities
+        self.xgrid = None
+        self.ygrid = None
+        self.zgrid = None
+
+        # dictionaries of atomic densities
+        self.atdens = {}
+
+        # conversion from boh to angs for VMD visualization
+        self.bohr2ang = 0.52918
+
+        # contact distance to locate the interface
+        self.contact_distance = contact_distance
+
+        # progress bar
+        self.local_tqdm = lambda x: tqdm(x) if prog_bar else x
+        self.time = time
+
+        # if we already have an output containing the grid
+        # we update the existing features
+        _update_ = False
+        if self.mol_basename + '/grid_points/x' in self.hdf5:
+            _update_ = True
+
+        if _update_:
+            logif(f'\n=Updating grid data for {self.mol_basename}.',
+                  self.time)
+            self.update_feature()
+        else:
+            logif(f'\n= Creating grid and grid data for {self.mol_basename}.',
+                  self.time)
+            self.create_new_data()
+
+    def read_pdb(self):
+        """Create a sql databse for the pdb."""
+
+        self.sqldb = pdb2sql.interface(self.molgrp['complex'])
+
+    def export_grid_points(self):
+        """export the grid points to the data dict."""
+        self.hdf5.require_group(self.mol_basename + '/grid_points')
+        self.hdf5['grid_points'] = dict()
+        grd = self.hdf5['grid_points']
+        grd['x'] = self.x
+        grd['y'] = self.y
+        grd['z'] = self.z
+        # grd.create_dataset('y', data=self.y)
+        # grd.create_dataset('z', data=self.z)
+
+        # add center or update it when the old value is different
+        if 'center' not in grd:
+            grd['center'] = self.center_contact
+            # grd.create_dataset('center', data=self.center_contact)
+        elif not all(grd['center'] == self.center_contact):
+            grd['center'][...] = self.center_contact
+
+    def add_all_features(self):
+        """Add all the features toa given molecule."""
+
+        # map the features
+        if self.feature is not None:
+
+            # map the residue features
+            dict_data = self.map_features(self.feature)
+
+            # save to hdf5 if specfied
+            # t0 = time()
+            # logif('-- Save Features to HDF5', self.time)
+            #
+            # self.hdf5_grid_data(dict_data, 'Feature_%s' % (self.feature_mode))
+            # logif('      Total %f ms' % ((time() - t0) * 1000), self.time)
+
+
+            data_name = 'Feature_%s' % (self.feature_mode)
+            self.add_grid_data(dict_data, data_name)
+
+    def add_all_atomic_densities(self):
+        """Add all atomic densities."""
+
+        # if we wnat the atomic densisties
+        if self.atomic_densities is not None:
+            # compute the atomic densities
+            self.map_atomic_densities()
+
+            # t0 = time()
+            # logif('-- Save Atomic Densities to HDF5', self.time)
+            # self.hdf5_grid_data(self.atdens, 'AtomicDensities_%s' %
+            #                     (self.atomic_densities_mode))
+            # logif('      Total %f ms' % ((time() - t0) * 1000), self.time)
+            self.add_grid_data(self.atdens, 'AtomicDensities_%s' %
+                                (self.atomic_densities_mode))
+
+    def add_grid_data(self, dict_data, data_name):
+        """Save the mapped feature to the hdf5 file.
+
+        Args:
+            dict_data(dict): feature values stored as a dict
+            data_name(str): feature name
+        """
+        if 'mapped_features' not in self.hdf5:
+            self.hdf5['mapped_features'] = dict()
+        self.hdf5['mapped_features'][data_name] = dict()
+        feat_group = self.hdf5['mapped_features'][data_name]
+
+        # gothrough all the feature elements
+        for key, value in dict_data.items():
+
+            # remove only subgroup
+            if key in feat_group:
+                del feat_group[key]
+
+            # create new one
+
+            # sub_feat_group = feat_group.create_group(key)
+            feat_group[key] = dict()
+            sub_feat_group = feat_group[key]
+
+            # try  a sparse representation
+            if self.try_sparse:
+
+                # check if the grid is sparse or not
+                t0 = time()
+                spg = sparse.FLANgrid()
+                spg.from_dense(value, beta=1E-2)
+                if self.time:
+                    print('      Sparsing time %f ms' % ((time() - t0) * 1000))
+
+                # if we have a sparse matrix
+                if spg.sparse:
+                    sub_feat_group['sparse'] = spg.sparse
+                    sub_feat_group['type'] = 'sparse_matrix'
+                    sub_feat_group['index'] = spg.index
+                    # sub_feat_group.create_dataset(
+                    #     'index', data=spg.index,
+                    #     compression='gzip', compression_opts=9)
+                    sub_feat_group['value'] = spg.value
+                    # sub_feat_group.create_dataset(
+                    #     'value', data=spg.value,
+                    #     compression='gzip', compression_opts=9)
+
+                else:
+                    sub_feat_group['sparse'] = spg.sparse
+                    sub_feat_group['type'] = 'dense_matrix'
+                    sub_feat_group['value'] = spg.value
+                    # sub_feat_group.create_dataset(
+                    #     'value', data=spg.value,
+                    #     compression='gzip', compression_opts=9)
+
+            else:
+                sub_feat_group['sparse'] = False
+                sub_feat_group['type'] = 'dense_matrix'
+                sub_feat_group['value'] = value
+                # sub_feat_group.create_dataset(
+                #     'value', data=value,
+                #     compression='gzip', compression_opts=9)
+
+
+
+
+
