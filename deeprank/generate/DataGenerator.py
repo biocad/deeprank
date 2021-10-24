@@ -13,6 +13,7 @@ import deeprank
 from deeprank import config
 from deeprank.config import logger
 from deeprank.generate import GridTools as gt
+# from deeprank.generate import
 import pdb2sql
 from pdb2sql.align import align as align_along_axis
 from pdb2sql.align import align_interface
@@ -1767,6 +1768,7 @@ class DataGeneratorRAM(DataGenerator):
         super().__init__(*args, **kwargs)
 
         self.data_dict = dict()
+        self.mol_list = []
 
     def create_database(
             self,
@@ -1873,10 +1875,11 @@ class DataGeneratorRAM(DataGenerator):
                         ref = None
 
                 # crete a subgroup for the molecule
-                # TODO make it dict-like
+                self.mol_list.append(mol_name)
                 self.data_dict[mol_name] = dict()
                 molgrp = self.data_dict[mol_name]
                 self.data_dict[mol_name]['type'] = 'molecule'
+                self.data_dict[mol_name]['name'] = mol_name
 
                 # add the ref and the complex
                 self._add_pdb(molgrp, cplx, 'complex')
@@ -2265,7 +2268,7 @@ class DataGeneratorRAM(DataGenerator):
 
 
         # check all the input PDB files
-        #TODO fix keys in data_dict; keys() contain not only
+        #TODO fix keys in data_dict; keys() contain not only mol names
         mol_names = self.data_dict.keys()
         # mol_names = self.data_dict[]
 
@@ -2322,7 +2325,7 @@ class DataGeneratorRAM(DataGenerator):
 
         # get the local progress bar
         desc = '{:25s}'.format('Map Features')
-        mol_tqdm = tqdm(mol_names, desc=desc, disable=not prog_bar)
+        mol_tqdm = tqdm(self.mol_list, desc=desc, disable=not prog_bar)
 
         if not prog_bar:
             self.logger.info(f'{desc}: {self.hdf5}')
@@ -2359,8 +2362,8 @@ class DataGeneratorRAM(DataGenerator):
             try:
                 # compute the data we want on the grid
                 #TODO ahhh here we go again
-                gt.GridTools(
-                    molgrp=f5[mol],
+                gt.GridToolsRAM(
+                    molgrp=self.data_dict[mol],
                     chain1=self.chain1,
                     chain2=self.chain2,
                     number_of_points=grid_info['number_of_points'],
@@ -2386,7 +2389,7 @@ class DataGeneratorRAM(DataGenerator):
         if self.map_error:
             if remove_error:
                 for mol in self.map_error:
-                    del f5[mol]
+                    del self.data_dict[mol]
                 self.logger.warning(
                     f"Molecules with errored feature mapping are removed:\n"
                     f"{self.map_error}")

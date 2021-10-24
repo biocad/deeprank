@@ -211,6 +211,25 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, chain1, chain2):
     # close sql
     resdens.sql._close()
 
+
+def __compute_feature_ram__(pdb_data, featgrp, featgrp_raw, chain1, chain2):
+    resdens = ResidueDensity(pdb_data, chains1=chain1, chains2=chain2)
+
+    # get the residue conacts
+    resdens.get()
+
+    # extract the features
+    resdens.extract_features()
+
+    # export in the hdf5 file
+    # resdens.export_dataxyz_hdf5(featgrp)
+    # resdens.export_data_hdf5(featgrp_raw)
+
+    # close sql
+    resdens.sql._close()
+
+    return resdens.feature_data, resdens.feature_data_xyz
+
 ########################################################################
 #
 #  TEST THE CLASS

@@ -1000,8 +1000,9 @@ class GridToolsRAM(GridTools):
 
     def export_grid_points(self):
         """export the grid points to the data dict."""
-        self.hdf5.require_group(self.mol_basename + '/grid_points')
-        self.hdf5['grid_points'] = dict()
+        # self.hdf5.require_group(self.mol_basename + '/grid_points')
+        if 'grid_points' not in self.hdf5:
+            self.hdf5['grid_points'] = dict()
         grd = self.hdf5['grid_points']
         grd['x'] = self.x
         grd['y'] = self.y

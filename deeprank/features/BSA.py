@@ -186,6 +186,35 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, chain1, chain2):
     bsa.sql._close()
 
 
+def __compute_feature_ram__(pdb_data, featgrp, featgrp_raw, chain1, chain2):
+    """Main function called in deeprank for the feature calculations.
+
+    Args:
+        pdb_data (list(bytes)): pdb information
+        featgrp (str): name of the group where to save xyz-val data
+        featgrp_raw (str): name of the group where to save human readable data
+        chain1 (str): First chain ID
+        chain2 (str): Second chain ID
+    """
+
+    # create the BSA instance
+    bsa = BSA(pdb_data, chain1, chain2)
+
+    # get the structure/calc
+    bsa.get_structure()
+
+    # get the feature info
+    bsa.get_contact_residue_sasa()
+
+    # export in the hdf5 file
+    # bsa.export_dataxyz_hdf5(featgrp)
+    # bsa.export_data_hdf5(featgrp_raw)
+
+    # close the file
+    bsa.sql._close()
+    return bsa.feature_data, bsa.feature_data_xyz
+
+
 ########################################################################
 #
 #       TEST THE CLASS
