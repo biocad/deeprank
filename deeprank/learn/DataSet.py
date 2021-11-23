@@ -2215,7 +2215,7 @@ class DataSetForPretrainedModelRAM(DataSet):
             index (int): index of the complex
 
         Returns:
-            dict: {'mol':[fname,mol],'feature':feature,'target':target}
+            dict: {'mol':[mol],'feature':feature,'target':target}
         """
         fname, mol, angle, axis = self.index_complexes[index]
         try:
