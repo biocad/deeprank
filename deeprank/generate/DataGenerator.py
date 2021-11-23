@@ -1764,11 +1764,81 @@ class DataGenerator(object):
                 molgrp['features/' + fn][:, 1:4] = xyz_rot
 
 class DataGeneratorRAM(DataGenerator):
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, chain1, chain2,
+                 pdb_select=None, pdb_source=None,
+                 pdb_native=None, pssm_source=None, align=None,
+                 compute_targets=None, compute_features=None,
+                 data_augmentation=None, hdf5='database.h5',
+                 mpi_comm=None):
+
+        self.chain1 = chain1
+        self.chain2 = chain2
+
+        self.pdb_select = pdb_select or []
+        self.pdb_source = []
+        self.mol_list = []
+
+        for name, pdb in pdb_source:
+            self.mol_list.append(name)
+            self.pdb_source.append(pdb)
+
+        self.pdb_native = pdb_native or []
+        self.pssm_source = pssm_source
+        self.align = align
+
+        if self.pssm_source is not None:
+            config.PATH_PSSM_SOURCE = self.pssm_source
+
+        self.compute_targets = compute_targets
+        self.compute_features = compute_features
+
+        self.data_augmentation = data_augmentation
+
+        self.hdf5 = hdf5
+
+        self.mpi_comm = mpi_comm
+
+        # set helper attributes
+        self.all_pdb = []
+        self.all_native = []
+        self.pdb_path = []
+
+        self.feature_error = []
+        self.grid_error = []
+        self.map_error = []
+
+        self.logger = logger
+
+        # handle the pdb_select
+        if not isinstance(self.pdb_select, list):
+            self.pdb_select = [self.pdb_select]
+
+        # handle the sources
+        if not isinstance(self.pdb_source, list):
+            self.pdb_source = [self.pdb_source]
+
+        # handle pssm source
+        pssm_features = ('deeprank.features.FullPSSM',
+                         'deeprank.features.PSSM_IC')
+        if self.compute_features and \
+                set.intersection(set(pssm_features), set(self.compute_features)):
+            if config.PATH_PSSM_SOURCE is None:
+                raise ValueError(
+                    'You must provide "pssm_source" to compute PSSM features.')
+
+        # handle the native
+        if not isinstance(self.pdb_native, list):
+            self.pdb_native = [self.pdb_native]
+
+        # filter the cplx if required
+        if self.pdb_select:
+            for i in self.pdb_select:
+                self.pdb_path += list(filter(lambda x: i in x,
+                                             self.all_pdb))
+        else:
+            self.pdb_path = self.all_pdb
 
         self.data_dict = dict()
-        self.mol_list = []
 
     def create_database(
             self,
@@ -1778,39 +1848,39 @@ class DataGeneratorRAM(DataGenerator):
             contact_distance=8.5,
             random_seed=None):
 
-        # here we construct the same as in Datagenerator, but only use RAM
+        # here we construct the same as in DataGenerator, but only use RAM
 
         # check decoy pdb files
-        if not self.pdb_path:
-            raise ValueError(f"Decoy pdb files not found. Check class "
+        if not self.pdb_source:
+            raise ValueError(f"Decoy pdbs not found. Check class "
                              f"parameters 'pdb_source' and 'pdb_select'.")
 
-        self.local_pdbs = self.pdb_path
+        self.local_pdbs = self.pdb_source
 
-        if self.mpi_comm is not None:
-            rank = self.mpi_comm.Get_rank()
-            size = self.mpi_comm.Get_size()
-        else:
-            size = 1
+        # if self.mpi_comm is not None:
+        #     rank = self.mpi_comm.Get_rank()
+        #     size = self.mpi_comm.Get_size()
+        # else:
+        #     size = 1
+        #
+        # if size > 1:
+        #     if rank == 0:
+        #         pdbs = [self.pdb_path[i::size] for i in range(size)]
+        #         self.local_pdbs = pdbs[0]
+        #         # send to other procs
+        #         for iP in range(1, size):
+        #             self.mpi_comm.send(pdbs[iP], dest=iP, tag=11)
+        #     else:
+        #         # receive procs
+        #         self.local_pdbs = self.mpi_comm.recv(source=0, tag=11)
+        #     # change hdf5 name
+        #     h5path, h5name = os.path.split(self.hdf5)
+        #     self.hdf5 = os.path.join(h5path, f"{rank:03d}_{h5name}")
 
-        if size > 1:
-            if rank == 0:
-                pdbs = [self.pdb_path[i::size] for i in range(size)]
-                self.local_pdbs = pdbs[0]
-                # send to other procs
-                for iP in range(1, size):
-                    self.mpi_comm.send(pdbs[iP], dest=iP, tag=11)
-            else:
-                # receive procs
-                self.local_pdbs = self.mpi_comm.recv(source=0, tag=11)
-            # change hdf5 name
-            h5path, h5name = os.path.split(self.hdf5)
-            self.hdf5 = os.path.join(h5path, f"{rank:03d}_{h5name}")
-
-        self.data_dict['pdb_source'] = [
-            os.path.abspath(f) for f in self.pdb_source]
-        self.data_dict['pdb_native'] = [
-            os.path.abspath(f) for f in self.pdb_native]
+        # self.data_dict['pdb_source'] = [
+        #     os.path.abspath(f) for f in self.pdb_source]
+        # self.data_dict['pdb_native'] = [
+        #     os.path.abspath(f) for f in self.pdb_native]
         self.data_dict['pssm_source'] = os.path.abspath(
             self.pssm_source)
         if self.compute_features is not None:
@@ -1822,17 +1892,16 @@ class DataGeneratorRAM(DataGenerator):
 
         # get the local progress bar
         desc = '{:25s}'.format('Creating database')
-        cplx_tqdm = tqdm(self.local_pdbs, desc=desc,
-                         disable=not prog_bar)
+        # cplx_tqdm = tqdm(self.local_pdbs, desc=desc,
+        #                  disable=not prog_bar)
 
-        for cplx in cplx_tqdm:
+        for name, cplx in zip(self.mol_list, self.local_pdbs):
 
-            cplx_tqdm.set_postfix(mol=os.path.basename(cplx))
+            # cplx_tqdm.set_postfix(mol=os.path.basename(cplx))
             self.logger.info(f'\nProcessing PDB file: {cplx}')
 
             # names of the molecule
-            mol_name = os.path.splitext(os.path.basename(cplx))[0]
-            mol_aug_name_list = []
+            mol_name = name
 
             try:
 
@@ -1875,16 +1944,17 @@ class DataGeneratorRAM(DataGenerator):
                         ref = None
 
                 # crete a subgroup for the molecule
-                self.mol_list.append(mol_name)
+                # self.mol_list.append(mol_name)
                 self.data_dict[mol_name] = dict()
                 molgrp = self.data_dict[mol_name]
                 self.data_dict[mol_name]['type'] = 'molecule'
                 self.data_dict[mol_name]['name'] = mol_name
 
                 # add the ref and the complex
-                self._add_pdb(molgrp, cplx, 'complex')
-                if ref is not None:
-                    self._add_pdb(molgrp, ref, 'native')
+                molgrp['complex'] = cplx
+                # self._add_pdb(molgrp, cplx, 'complex')
+                # if ref is not None:
+                #     self._add_pdb(molgrp, ref, 'native')
 
                 if verbose:
                     self.logger.info(
@@ -2361,7 +2431,6 @@ class DataGeneratorRAM(DataGenerator):
 
             try:
                 # compute the data we want on the grid
-                #TODO ahhh here we go again
                 gt.GridToolsRAM(
                     molgrp=self.data_dict[mol],
                     chain1=self.chain1,
