@@ -2152,7 +2152,7 @@ class DataGeneratorRAM(DataGenerator):
         if errored_mol:
             if remove_error:
                 for mol in errored_mol:
-                    del self.f5[mol]
+                    del self.data_dict[mol]
                 if self.feature_error:
                     self.logger.info(
                         f'Molecules with errored features are removed:'

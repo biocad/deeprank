@@ -175,10 +175,10 @@ complex_data = DataGeneratorRAM(pdb_source=list_of_conformations,
 complex_data.create_database()
 pr.disable()
 s = io.StringIO()
-# sortby = SortKey.CUMULATIVE
+sortby = SortKey.CUMULATIVE
 ps = pstats.Stats(pr, stream=s).sort_stats(SortKey.CUMULATIVE)
 ps.print_stats()
-with open('profile.txt', 'w+') as f:
+with open('profile_clust1.txt', 'w+') as f:
     f.write(s.getvalue())
 
 grid_info = {'number_of_points': [30, 30, 30],

@@ -20,6 +20,8 @@ class interface(pdb2sql.interface):
             only_backbone_atoms=False,
             return_contact_pairs=False):
 
+        print("Hello from get_contact_residues_with_icodes()")
+
         if return_contact_pairs:
 
             # declare the dict
@@ -137,8 +139,9 @@ class interface(pdb2sql.interface):
 
         for chains in chainIDs:
             chains_tup = tuple(chains)
+            print(chains_tup)
             data = np.array(
-                self.get('x,y,z,rowID,resName,name', chainID=tuple(chains)))
+                self.get('x,y,z,rowID,resName,name', chainID=chains))
             xyz[chains_tup] = data[:, :3].astype(float)
             index[chains_tup] = data[:, 3].astype(int)
             resName[chains_tup] = data[:, -2]
@@ -161,11 +164,11 @@ class interface(pdb2sql.interface):
             atName1 = atName[ch1]
             atName2 = atName[ch2]
             #TODO I stopped here
-            if chain1 not in index_contact:
-                index_contact[chain1] = []
+            if tuple(chain1) not in index_contact:
+                index_contact[tuple(chain1)] = []
 
-            if chain2 not in index_contact:
-                index_contact[chain2] = []
+            if tuple(chain2) not in index_contact:
+                index_contact[tuple(chain2)] = []
 
             for i, x0 in enumerate(xyz1):
 
@@ -181,15 +184,15 @@ class interface(pdb2sql.interface):
                         [not only_backbone_atoms, atName1[i] in self.backbone_atoms]):
 
                     pairs = [
-                        index[chain2][k] for k in contacts if any(
+                        index[ch2][k] for k in contacts if any(
                             [
                                 atName2[k] in self.backbone_atoms,
                                 not only_backbone_atoms]) and not (
                             excludeH and atName2[k][0] == 'H')]
                     if len(pairs) > 0:
-                        index_contact_pairs[index[chain1][i]] = pairs
-                        index_contact[chain1] += [index[chain1][i]]
-                        index_contact[chain2] += pairs
+                        index_contact_pairs[index[ch1][i]] = pairs
+                        index_contact[ch1] += [index[ch1][i]]
+                        index_contact[ch2] += pairs
 
         # if no atoms were found
         if len(index_contact_pairs) == 0:
@@ -197,13 +200,13 @@ class interface(pdb2sql.interface):
 
         # get uniques
         for chain in chainIDs:
-            index_contact[chain] = sorted(set(index_contact[chain]))
+            index_contact[tuple(chain)] = sorted(set(index_contact[tuple(chain)]))
 
         # extend the list to entire residue
         if extend_to_residue:
             for chain in chainIDs:
-                index_contact[chain] = self._extend_contact_to_residue(
-                    index_contact[chain], only_backbone_atoms)
+                index_contact[tuple(chain)] = self._extend_contact_to_residue(
+                    index_contact[tuple(chain)], only_backbone_atoms)
 
         # not sure that's the best way of dealing with that
         # TODO split to two functions get_contact_atoms and

@@ -47,19 +47,25 @@ class ResidueDensity(FeatureClass):
 
         chain_pairs = list(itertools.product(self.chains1, self.chains2))
 
-        contact_dicts = [self.sql.get_contact_residues_with_icodes(chain1=chain1,
-                                                       chain2=chain2,
+        # contact_dicts = [self.sql.get_contact_residues_with_icodes(chain1=chain1,
+        #                                                chain2=chain2,
+        #                                                cutoff=cutoff,
+        #                                                return_contact_pairs=True) for chain1, chain2 in chain_pairs]
+
+        contact_dict = self.sql.get_contact_residues_with_icodes(chain1=self.chains1,
+                                                       chain2=self.chains2,
                                                        cutoff=cutoff,
-                                                       return_contact_pairs=True) for chain1, chain2 in chain_pairs]
+                                                       return_contact_pairs=True)
 
-        res = dict()
+        # res = dict()
+        res = contact_dict
 
-        for d in contact_dicts:
-            for key, reslist in d.items():
-                if key not in res:
-                    res[key] = reslist
-                else:
-                    res[key] = list(set(res[key] + reslist))
+        # for d in contact_dicts:
+        #     for key, reslist in d.items():
+        #         if key not in res:
+        #             res[key] = reslist
+        #         else:
+        #             res[key] = list(set(res[key] + reslist))
 
         # res = self.sql.get_contact_residues(chain1=self.chains_label[0],
         #                                    chain2=self.chains_label[1],

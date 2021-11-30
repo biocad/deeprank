@@ -89,11 +89,13 @@ class BSA(FeatureClass):
         self.bsa_data = {}
         self.bsa_data_xyz = {}
 
-        ctc_res_list = []
-        for ch1, ch2 in itertools.product(self.chain1, self.chain2):
-            ctc_res = self.sql.get_contact_residues_with_icodes(cutoff=cutoff, chain1=ch1, chain2=ch2)
-            ctc_res_list = list(set(ctc_res_list + ctc_res[ch1] + ctc_res[ch2]))
+        # ctc_res_list = []
+        # for ch1, ch2 in itertools.product(self.chain1, self.chain2):
+        #     ctc_res = self.sql.get_contact_residues_with_icodes(cutoff=cutoff, chain1=ch1, chain2=ch2)
+        #     ctc_res_list = list(set(ctc_res_list + ctc_res[ch1] + ctc_res[ch2]))
 
+        ctc_res = self.sql.get_contact_residues_with_icodes(cutoff=cutoff, chain1=self.chain1, chain2=self.chain2)
+        ctc_res_list = ctc_res[tuple(self.chain1)] + ctc_res[tuple(self.chain2)]
 
         # ctc_res_all = self.sql.get_contact_residues_with_icodes(cutoff=cutoff, chain1=self.chain1, chain2=self.chain2)
         # ctc_res = []
