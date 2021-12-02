@@ -9,7 +9,7 @@ from deeprank.tools.interface import interface
 
 class ResidueDensity(FeatureClass):
 
-    def __init__(self, pdb_data, chains1='A', chains2='B'):
+    def __init__(self, pdb_data, precomputed_dict, chains1='A', chains2='B'):
         """Compute the residue contacts between polar/apolar/charged residues.
 
         Args:
@@ -24,7 +24,9 @@ class ResidueDensity(FeatureClass):
         """
 
         self.pdb_data = pdb_data
-        self.sql = interface(pdb_data)
+        self.sql = precomputed_dict['interface']
+        self.contact_pairs = precomputed_dict['contact_pairs']
+        # self.sql = interface(pdb_data)
         # self.sql = pdb2sql.interface(pdb_data)
         self.chains_label = [chains1, chains2]
         self.chains1 = chains1
@@ -45,17 +47,18 @@ class ResidueDensity(FeatureClass):
         #                               ('chain2,res1Seq,res1Name),
         #                               ('chain2,res2Seq,res2Name'))}
 
-        chain_pairs = list(itertools.product(self.chains1, self.chains2))
+        # chain_pairs = list(itertools.product(self.chains1, self.chains2))
 
         # contact_dicts = [self.sql.get_contact_residues_with_icodes(chain1=chain1,
         #                                                chain2=chain2,
         #                                                cutoff=cutoff,
         #                                                return_contact_pairs=True) for chain1, chain2 in chain_pairs]
-
-        contact_dict = self.sql.get_contact_residues_with_icodes(chain1=self.chains1,
-                                                       chain2=self.chains2,
-                                                       cutoff=cutoff,
-                                                       return_contact_pairs=True)
+        # contact_dict = self.sql.get_contact_residues_with_icodes(chain1=self.chains1,
+        #                                                chain2=self.chains2,
+        #                                                cutoff=cutoff,
+        #                                                return_contact_pairs=True)
+        contact_dict = self.contact_pairs
+                            
 
         # res = dict()
         res = contact_dict
@@ -218,8 +221,8 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, chain1, chain2):
     resdens.sql._close()
 
 
-def __compute_feature_ram__(pdb_data, featgrp, featgrp_raw, chain1, chain2):
-    resdens = ResidueDensity(pdb_data, chains1=chain1, chains2=chain2)
+def __compute_feature_ram__(pdb_data, featgrp, featgrp_raw, chain1, chain2, precomputed_dict):
+    resdens = ResidueDensity(pdb_data, precomputed_dict, chains1=chain1, chains2=chain2)
 
     # get the residue conacts
     resdens.get()
@@ -232,7 +235,7 @@ def __compute_feature_ram__(pdb_data, featgrp, featgrp_raw, chain1, chain2):
     # resdens.export_data_hdf5(featgrp_raw)
 
     # close sql
-    resdens.sql._close()
+    # resdens.sql._close()
 
     return resdens.feature_data, resdens.feature_data_xyz
 

@@ -13,6 +13,8 @@ import deeprank
 from deeprank import config
 from deeprank.config import logger
 from deeprank.generate import GridTools as gt
+from deeprank.tools.interface import interface
+
 # from deeprank.generate import
 import pdb2sql
 from pdb2sql.align import align as align_along_axis
@@ -1857,30 +1859,7 @@ class DataGeneratorRAM(DataGenerator):
 
         self.local_pdbs = self.pdb_source
 
-        # if self.mpi_comm is not None:
-        #     rank = self.mpi_comm.Get_rank()
-        #     size = self.mpi_comm.Get_size()
-        # else:
-        #     size = 1
-        #
-        # if size > 1:
-        #     if rank == 0:
-        #         pdbs = [self.pdb_path[i::size] for i in range(size)]
-        #         self.local_pdbs = pdbs[0]
-        #         # send to other procs
-        #         for iP in range(1, size):
-        #             self.mpi_comm.send(pdbs[iP], dest=iP, tag=11)
-        #     else:
-        #         # receive procs
-        #         self.local_pdbs = self.mpi_comm.recv(source=0, tag=11)
-        #     # change hdf5 name
-        #     h5path, h5name = os.path.split(self.hdf5)
-        #     self.hdf5 = os.path.join(h5path, f"{rank:03d}_{h5name}")
-
-        # self.data_dict['pdb_source'] = [
-        #     os.path.abspath(f) for f in self.pdb_source]
-        # self.data_dict['pdb_native'] = [
-        #     os.path.abspath(f) for f in self.pdb_native]
+        
         self.data_dict['pssm_source'] = os.path.abspath(
             self.pssm_source)
         if self.compute_features is not None:
@@ -1945,6 +1924,7 @@ class DataGeneratorRAM(DataGenerator):
 
                 # crete a subgroup for the molecule
                 # self.mol_list.append(mol_name)
+                
                 self.data_dict[mol_name] = dict()
                 molgrp = self.data_dict[mol_name]
                 self.data_dict[mol_name]['type'] = 'molecule'
@@ -1955,6 +1935,22 @@ class DataGeneratorRAM(DataGenerator):
                 # self._add_pdb(molgrp, cplx, 'complex')
                 # if ref is not None:
                 #     self._add_pdb(molgrp, ref, 'native')
+
+                # get here interface atoms and residues
+                self.logger.info("Precomputing neccessary informnation about interface")
+                precomputed_dict = dict()
+
+                cutoff = 5.5
+
+                interface_db = interface(cplx)
+                contacts_pairs, contacts = interface_db.get_contact_residues_with_icodes(chain1=self.chain1,
+                                                       chain2=self.chain2,
+                                                       cutoff=cutoff,
+                                                       return_contact_pairs=True)
+
+                precomputed_dict['contact_pairs'] = contacts_pairs
+                precomputed_dict['contacts'] = contacts
+                precomputed_dict['interface'] = interface_db
 
                 if verbose:
                     self.logger.info(
@@ -1986,7 +1982,10 @@ class DataGeneratorRAM(DataGenerator):
                                                                 molgrp['features_raw'],
                                                                 self.chain1,
                                                                 self.chain2,
+                                                                precomputed_dict,
                                                                 self.logger)
+
+                    interface_db._close()
                     if feature_error_flag:
                         self.feature_error += [mol_name]
                         # ignore the targets/grid/augmentation computation
@@ -2204,7 +2203,7 @@ class DataGeneratorRAM(DataGenerator):
         molgrp[name] = data
 
     @staticmethod
-    def _compute_features(feat_list, pdb_data, featgrp, featgrp_raw, chain1, chain2, logger):
+    def _compute_features(feat_list, pdb_data, featgrp, featgrp_raw, chain1, chain2, precomputed_dict, logger):
         """Compute the features.
 
         Args:
@@ -2226,7 +2225,7 @@ class DataGeneratorRAM(DataGenerator):
             try:
                 feat_module = importlib.import_module(feat, package=None)
                 feature_raw, feature = feat_module.__compute_feature_ram__(pdb_data, featgrp, featgrp_raw,
-                                                chain1, chain2)
+                                                chain1, chain2, precomputed_dict)
 
                 for name, data in feature.items():
                     ds = np.array([list(key) + value for key, value in data.items()])

@@ -974,7 +974,7 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, chains1, chains2):
     # close
     atfeat.sqldb._close()
 
-def __compute_feature_ram__(pdb_data, featgrp, featgrp_raw, chains1, chains2):
+def __compute_feature_ram__(pdb_data, featgrp, featgrp_raw, chains1, chains2, precomputed_dict):
     path = os.path.dirname(os.path.realpath(__file__))
     FF = path + '/forcefield/'
 
