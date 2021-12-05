@@ -18,7 +18,8 @@ class interface(pdb2sql.interface):
             chain2='B',
             excludeH=False,
             only_backbone_atoms=False,
-            return_contact_pairs=False):
+            return_contact_pairs=False,
+            precomputed_contact_atoms=None):
 
         print("Hello from get_contact_residues_with_icodes()")
 
@@ -28,14 +29,17 @@ class interface(pdb2sql.interface):
         residue_contact_pairs = {}
 
             # get the contact atom pairs
-        atom_pairs, contact_atoms = self.get_contact_atoms (
-                cutoff=cutoff,
-                allchains=allchains,
-                chain1=chain1,
-                chain2=chain2,
-                only_backbone_atoms=only_backbone_atoms,
-                excludeH=excludeH,
-                return_contact_pairs=True)
+        if not precomputed_contact_atoms:
+            atom_pairs, contact_atoms = self.get_contact_atoms (
+                    cutoff=cutoff,
+                    allchains=allchains,
+                    chain1=chain1,
+                    chain2=chain2,
+                    only_backbone_atoms=only_backbone_atoms,
+                    excludeH=excludeH,
+                    return_contact_pairs=True)
+        else:
+            atom_pairs, contact_atoms = precomputed_contact_atoms
 
             # loop over the atom pair dict
         for iat1, atoms2 in atom_pairs.items():
@@ -114,6 +118,8 @@ class interface(pdb2sql.interface):
         Returns:
 
         """
+
+        print(f"computing contact atoms with {cutoff} cutoff")
         if allchains:
             chainIDs = self.get_chains()
         else:
@@ -215,3 +221,4 @@ class interface(pdb2sql.interface):
         #     return index_contact
 
         return index_contact_pairs, index_contact
+

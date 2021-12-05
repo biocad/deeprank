@@ -52,10 +52,10 @@ class NeuralNetPredictor(NeuralNet):
 
         return data
 
-class MyPDBComplex:
+# class MyPDBComplex:
 
-    def __init__(self, filename):
-        pass
+#     def __init__(self, filename):
+#         pass
 
 def get_pdb_data_and_coordinates(filename):
     data = []
@@ -186,7 +186,16 @@ grid_info = {'number_of_points': [30, 30, 30],
              'atomic_densities': {'C': 1.7, 'N': 1.55, 'O': 1.52, 'S': 1.8}
             }
 
+pr_map = cProfile.Profile()
+pr_map.enable()
 complex_data.map_features(grid_info, try_sparse=True, prog_bar=False)
+pr_map.disable()
+s = io.StringIO()
+sortby = SortKey.CUMULATIVE
+ps = pstats.Stats(pr_map, stream=s).sort_stats(SortKey.CUMULATIVE)
+ps.print_stats()
+with open('profile_clust_map.txt', 'w+') as f:
+    f.write(s.getvalue())
 
 data_set = DataSetForPretrainedModelRAM(train_database=complex_data,
                                          grid_shape=(30, 30, 30),

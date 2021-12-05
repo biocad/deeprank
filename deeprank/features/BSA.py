@@ -16,7 +16,7 @@ except ImportError:
 
 class BSA(FeatureClass):
 
-    def __init__(self, pdb_data, precomputed_dict, chain1='A', chain2='B'):
+    def __init__(self, pdb_data, interface, precomputed_dict, chain1='A', chain2='B'):
         """Compute the burried surface area feature.
 
         Freesasa is required for this feature.
@@ -36,7 +36,7 @@ class BSA(FeatureClass):
             >>> bsa.sql._close()
         """
         self.pdb_data = pdb_data
-        self.sql = precomputed_dict['interface']
+        self.sql = interface
         self.contacts = precomputed_dict['contacts']
         # self.sql = interface(pdb_data)
         self.chain1 = chain1
@@ -191,7 +191,7 @@ def __compute_feature__(pdb_data, featgrp, featgrp_raw, chain1, chain2):
     bsa.sql._close()
 
 
-def __compute_feature_ram__(pdb_data, featgrp, featgrp_raw, chain1, chain2, precomputed_dict):
+def __compute_feature_ram__(pdb_data, featgrp, featgrp_raw, chain1, chain2, interface, precomputed_dict):
     """Main function called in deeprank for the feature calculations.
 
     Args:
@@ -203,7 +203,7 @@ def __compute_feature_ram__(pdb_data, featgrp, featgrp_raw, chain1, chain2, prec
     """
 
     # create the BSA instance
-    bsa = BSA(pdb_data, precomputed_dict, chain1, chain2)
+    bsa = BSA(pdb_data, interface, precomputed_dict, chain1, chain2)
 
     # get the structure/calc
     bsa.get_structure()

@@ -1938,19 +1938,22 @@ class DataGeneratorRAM(DataGenerator):
 
                 # get here interface atoms and residues
                 self.logger.info("Precomputing neccessary informnation about interface")
-                precomputed_dict = dict()
 
-                cutoff = 5.5
+                self.add_precomputed_contacts_and_db(molgrp, cutoffs_list=[5.5, 8.5])
+                
+                # self.precomputed_dict = dict()
 
-                interface_db = interface(cplx)
-                contacts_pairs, contacts = interface_db.get_contact_residues_with_icodes(chain1=self.chain1,
-                                                       chain2=self.chain2,
-                                                       cutoff=cutoff,
-                                                       return_contact_pairs=True)
+                # cutoff = 5.5
 
-                precomputed_dict['contact_pairs'] = contacts_pairs
-                precomputed_dict['contacts'] = contacts
-                precomputed_dict['interface'] = interface_db
+                # interface_db = interface(cplx)
+                # contacts_pairs, contacts = interface_db.get_contact_residues_with_icodes(chain1=self.chain1,
+                #                                        chain2=self.chain2,
+                #                                        cutoff=cutoff,
+                #                                        return_contact_pairs=True)
+
+                # self.precomputed_dict['contact_pairs'] = contacts_pairs
+                # self.precomputed_dict['contacts'] = contacts
+                # self.precomputed_dict['interface'] = interface_db
 
                 if verbose:
                     self.logger.info(
@@ -1982,10 +1985,11 @@ class DataGeneratorRAM(DataGenerator):
                                                                 molgrp['features_raw'],
                                                                 self.chain1,
                                                                 self.chain2,
-                                                                precomputed_dict,
+                                                                molgrp['interface'],
+                                                                molgrp['precomputed'][5.5],
                                                                 self.logger)
 
-                    interface_db._close()
+                    # interface_db._close()
                     if feature_error_flag:
                         self.feature_error += [mol_name]
                         # ignore the targets/grid/augmentation computation
@@ -2039,19 +2043,22 @@ class DataGeneratorRAM(DataGenerator):
 
                 try:
                     center = self._get_grid_center(
-                        molgrp['complex'], contact_distance)
+                        molgrp, contact_distance)
                     molgrp['grid_points']['center'] = center
                         # 'center', data=center)
                     if verbose:
                         self.logger.info(
                             f'{"":4s}Generated subgroup "grid_points"'
                             f' to store grid box center.')
+
+                
                 except ValueError as ex:
                     grid_error_flag = True
                     self.grid_error += [mol_name]
                     self.logger.exception(ex)
                     if remove_error:
                         continue
+                # self.precomputed_dict['interface']._close()
                 #
                 # ################################################
                 # #   DATA AUGMENTATION
@@ -2203,7 +2210,7 @@ class DataGeneratorRAM(DataGenerator):
         molgrp[name] = data
 
     @staticmethod
-    def _compute_features(feat_list, pdb_data, featgrp, featgrp_raw, chain1, chain2, precomputed_dict, logger):
+    def _compute_features(feat_list, pdb_data, featgrp, featgrp_raw, chain1, chain2, interface, precomputed_dict, logger):
         """Compute the features.
 
         Args:
@@ -2225,7 +2232,7 @@ class DataGeneratorRAM(DataGenerator):
             try:
                 feat_module = importlib.import_module(feat, package=None)
                 feature_raw, feature = feat_module.__compute_feature_ram__(pdb_data, featgrp, featgrp_raw,
-                                                chain1, chain2, precomputed_dict)
+                                                chain1, chain2, interface, precomputed_dict)
 
                 for name, data in feature.items():
                     ds = np.array([list(key) + value for key, value in data.items()])
@@ -2468,5 +2475,69 @@ class DataGeneratorRAM(DataGenerator):
 
         # close he hdf5 file
         # f5.close()
+    def _get_grid_center(self, mol_dict, contact_distance):
+
+        sqldb = mol_dict['interface']
+
+        tmp = []
+
+        # for c1 in self.chain1:
+        #     for c2 in self.chain2:
+        #         contact_atoms = sqldb.get_contact_atoms(cutoff=contact_distance,
+        #                                                 chain1=c1, chain2=c2)
+        #         for i in contact_atoms.values():
+        #             tmp.extend(i)
+
+        # contact_atoms, _ = sqldb.get_contact_atoms(cutoff=contact_distance,
+        #                                                 chain1=self.chain1, chain2=self.chain2)
+
+        contact_atoms = mol_dict['precomputed'][contact_distance]['contact_atoms']
+        for i in contact_atoms.values():
+            tmp.extend(i)
+
+
+
+        # tmp = []
+        # for i in contact_atoms.values():
+        #     tmp.extend(i)
+        contact_atoms = list(set(tmp))
+
+        center_contact = np.mean(
+            np.array(sqldb.get('x,y,z', rowID=contact_atoms)), 0)
+
+        # sqldb._close()
+
+        return center_contact
+
+    def add_precomputed_contacts_and_db(self, mol_dict, cutoffs_list=[5.5, 8.5]):
+        interface_db = interface(mol_dict['complex'])
+        mol_dict['interface'] = interface_db
+        mol_dict['precomputed'] = dict()
+
+        for cutoff in cutoffs_list:
+            mol_dict['precomputed'][cutoff] = dict()
+            precomputed = mol_dict['precomputed'][cutoff] 
+
+            contact_atom_pairs, contact_atoms = interface_db.get_contact_atoms(cutoff=cutoff,
+                                                                                chain1=self.chain1,
+                                                                                chain2=self.chain2)
+            
+            precomputed['contact_atoms'] = contact_atoms
+            precomputed['contact_atom_pairs'] = contact_atom_pairs
+
+            contacts_pairs, contacts = interface_db.get_contact_residues_with_icodes(chain1=self.chain1,
+                                                       chain2=self.chain2,
+                                                       cutoff=cutoff,
+                                                       return_contact_pairs=True,
+                                                       precomputed_contact_atoms=(contact_atom_pairs, contact_atoms))
+
+                                     
+            precomputed['contact_pairs'] = contacts_pairs
+            precomputed['contacts'] = contacts
+
+
+    def close_dbs(self):
+        for mol in self.mol_list:
+            self.data_dict[mol]['interface']._close()
 
 
