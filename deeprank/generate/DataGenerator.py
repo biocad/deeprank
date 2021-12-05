@@ -2539,5 +2539,6 @@ class DataGeneratorRAM(DataGenerator):
     def close_dbs(self):
         for mol in self.mol_list:
             self.data_dict[mol]['interface']._close()
+            self.data_dict[mol]['interface'] = 42
 
 
