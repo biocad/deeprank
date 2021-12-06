@@ -10,7 +10,7 @@ import pdb2sql
 
 from deeprank.config import logger
 from deeprank.tools import sparse
-# from deeprank.tools.interface import interface
+from deeprank.tools.interface import interface
 
 try:
     from tqdm import tqdm
@@ -221,7 +221,7 @@ class GridTools(object):
         """Get the center of conact atoms."""
 
         tmp = []
-
+        
         for ch1, ch2 in itertools.product(self.chain1, self.chain2):
             contact_atoms = self.sqldb.get_contact_atoms(
                 cutoff=self.contact_distance, chain1=ch1, chain2=ch2)
@@ -973,6 +973,8 @@ class GridToolsRAM(GridTools):
 
         # contact distance to locate the interface
         self.contact_distance = contact_distance
+        print(self.contact_distance)
+
 
         # progress bar
         self.local_tqdm = lambda x: tqdm(x) if prog_bar else x
@@ -993,10 +995,46 @@ class GridToolsRAM(GridTools):
                   self.time)
             self.create_new_data()
 
+    def create_new_data(self):
+        """Create new feature for a given complex."""
+
+        # get the position/atom type .. of the complex
+        self.read_pdb()
+
+        # get the contact atoms and interface center
+        self.get_contact_center()
+
+        # define the grid
+        self.define_grid_points()
+
+        # save the grid points
+        self.export_grid_points()
+
+        # map the features
+        self.add_all_features()
+
+        # if we wnat the atomic densisties
+        self.add_all_atomic_densities()
+
     def read_pdb(self):
         """Create a sql databse for the pdb."""
 
-        self.sqldb = pdb2sql.interface(self.molgrp['complex'])
+        self.sqldb = self.molgrp['interface']
+
+    def get_contact_center(self):
+        """Get the center of conact atoms."""
+
+        tmp = []
+        
+        contact_atoms = self.molgrp['precomputed'][self.contact_distance]['contact_atoms']
+        for i in contact_atoms.values():
+            tmp.extend(i)
+        
+        contact_atoms = list(set(tmp))
+
+        # get interface center
+        self.center_contact = np.mean(
+            np.array(self.sqldb.get('x,y,z', rowID=contact_atoms)), 0)
 
     def export_grid_points(self):
         """export the grid points to the data dict."""
@@ -1116,6 +1154,148 @@ class GridToolsRAM(GridTools):
                 # sub_feat_group.create_dataset(
                 #     'value', data=value,
                 #     compression='gzip', compression_opts=9)
+    
+
+    def map_atomic_densities(self, only_contact=True):
+        """Map the atomic densities to the grid.
+
+        Args:
+            only_contact(bool, optional): Map only the contact atoms
+
+        Raises:
+            ImportError: Description
+        """
+        mode = self.atomic_densities_mode
+        logif('-- Map atomic densities on %dx%dx%d grid (mode=%s)' %
+              (self.npts[0], self.npts[1], self.npts[2], mode), self.time)
+
+        # prepare the cuda memory
+        if self.cuda:  # pragma: no cover
+
+            # try to import pycuda
+            try:
+                from pycuda import driver, compiler, gpuarray, tools
+                import pycuda.autoinit
+            except BaseException:
+                raise ImportError("Error when importing pyCuda in GridTools")
+
+            # book mem on the gpu
+            x_gpu = gpuarray.to_gpu(self.x.astype(np.float32))
+            y_gpu = gpuarray.to_gpu(self.y.astype(np.float32))
+            z_gpu = gpuarray.to_gpu(self.z.astype(np.float32))
+            grid_gpu = gpuarray.zeros(self.npts, np.float32)
+
+        # get the contact atoms
+        if only_contact:
+            tmp = dict()
+
+            contact_atoms = self.molgrp['precomputed'][self.contact_distance]['contact_atoms']
+
+            # for ch1, ch2 in itertools.product(self.chain1, self.chain2):
+            #     contact_atoms = self.sqldb.get_contact_atoms(
+            #         cutoff=self.contact_distance, chain1=ch1, chain2=ch2)
+            for chname, contacts in contact_atoms.items():
+                if chname not in tmp:
+                    tmp[chname] = contacts
+                else:
+                    tmp[chname] = list(set(contacts + tmp[chname]))
+
+            index = tmp
+            print(index.keys())
+            # index = self.sqldb.get_contact_atoms(cutoff=self.contact_distance,
+            #     chain1=self.chain1, chain2=self.chain2)
+        else:
+            index = {self.chain1: self.sqldb.get('rowID', chainID=self.chain1),
+                     self.chain2: self.sqldb.get('rowID', chainID=self.chain2)}
+
+        # loop over all the data we want
+        for elementtype, vdw_rad in self.local_tqdm(
+                self.atomic_densities.items()):
+
+            t0 = time()
+
+            indexA, indexB = [], []
+
+            indexA += index[tuple(self.chain1)]
+            indexB += index[tuple(self.chain2)]
+
+            # for ch in self.chain1:
+            #     indexA += index[ch]
+
+            # for ch in self.chain2:
+            #     indexB += index[ch]
+
+            xyzA = np.array(self.sqldb.get(
+                'x,y,z', rowID=indexA, element=elementtype))
+            xyzB = np.array(self.sqldb.get(
+                'x,y,z', rowID=indexB, element=elementtype))
+
+            tprocess = time() - t0
+
+            t0 = time()
+            # if we use CUDA
+            if self.cuda:  # pragma: no cover
+
+                # reset the grid
+                grid_gpu *= 0
+
+                # get the atomic densities of chain A
+                for pos in xyzA:
+                    x0, y0, z0 = pos.astype(np.float32)
+                    vdw = np.float32(vdw_rad)
+                    self.cuda_atomic(
+                        vdw, x0, y0, z0, x_gpu, y_gpu, z_gpu, grid_gpu, block=tuple(
+                            self.gpu_block), grid=tuple(
+                            self.gpu_grid))
+                    atdensA = grid_gpu.get()
+
+                # reset the grid
+                grid_gpu *= 0
+
+                # get the atomic densities of chain B
+                for pos in xyzB:
+                    x0, y0, z0 = pos.astype(np.float32)
+                    vdw = np.float32(vdw_rad)
+                    self.cuda_atomic(
+                        vdw, x0, y0, z0, x_gpu, y_gpu, z_gpu, grid_gpu, block=tuple(
+                            self.gpu_block), grid=tuple(
+                            self.gpu_grid))
+                    atdensB = grid_gpu.get()
+
+            # if we don't use CUDA
+            else:
+
+                # init the grid
+                atdensA = np.zeros(self.npts)
+                atdensB = np.zeros(self.npts)
+
+                # run on the atoms
+                for pos in xyzA:
+                    atdensA += self.densgrid(pos, vdw_rad)
+
+                # run on the atoms
+                for pos in xyzB:
+                    atdensB += self.densgrid(pos, vdw_rad)
+
+            # create the final grid: A - B
+            if mode == 'diff':
+                self.atdens[elementtype] = atdensA - atdensB
+
+            # create the final grid: A + B
+            elif mode == 'sum':
+                self.atdens[elementtype] = atdensA + atdensB
+
+            # create the final grid: A and B
+            elif mode == 'ind':
+                self.atdens[elementtype + '_chain1'] = atdensA
+                self.atdens[elementtype + '_chain2'] = atdensB
+            else:
+                raise ValueError(f'Atomic density mode {mode} not recognized')
+
+            tgrid = time() - t0
+            logif('     Process time %f ms' % (tprocess * 1000), self.time)
+            logif('     Grid    time %f ms' % (tgrid * 1000), self.time)
+
 
 
 

@@ -2530,7 +2530,6 @@ class DataGeneratorRAM(DataGenerator):
                                                        cutoff=cutoff,
                                                        return_contact_pairs=True,
                                                        precomputed_contact_atoms=(contact_atom_pairs, contact_atoms))
-
                                      
             precomputed['contact_pairs'] = contacts_pairs
             precomputed['contacts'] = contacts

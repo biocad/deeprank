@@ -190,6 +190,7 @@ pr_map = cProfile.Profile()
 pr_map.enable()
 complex_data.map_features(grid_info, try_sparse=True, prog_bar=False)
 pr_map.disable()
+complex_data.close_dbs()
 s = io.StringIO()
 sortby = SortKey.CUMULATIVE
 ps = pstats.Stats(pr_map, stream=s).sort_stats(SortKey.CUMULATIVE)
