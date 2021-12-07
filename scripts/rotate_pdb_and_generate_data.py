@@ -212,11 +212,11 @@ data_set = DataSetForPretrainedModelRAM(train_database=complex_data,
 
 # and here -- NeuralNet
 
-PATH_TO_MODEL = '/home/gpu03/projects_jbremote/deeprank/sample_train/best_valid_model.pth.tar'
+PATH_TO_MODEL = '/data/user/strashko/hedge/python/tests/resources/test_apply_deeprank_model/deeprank_model.pth.tar'
 
 model = NeuralNetPredictor(data_set=data_set,
                                model=cnn_class,
-                               cuda=False,
+                               cuda=True,
                                task='class',
                                pretrained_model=PATH_TO_MODEL)
 

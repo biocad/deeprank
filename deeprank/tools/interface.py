@@ -21,8 +21,6 @@ class interface(pdb2sql.interface):
             return_contact_pairs=False,
             precomputed_contact_atoms=None):
 
-        print("Hello from get_contact_residues_with_icodes()")
-
         # if return_contact_pairs:
 
             # declare the dict
@@ -118,8 +116,6 @@ class interface(pdb2sql.interface):
         Returns:
 
         """
-
-        print(f"computing contact atoms with {cutoff} cutoff")
         if allchains:
             chainIDs = self.get_chains()
         else:
@@ -144,7 +140,6 @@ class interface(pdb2sql.interface):
 
         for chains in chainIDs:
             chains_tup = tuple(chains)
-            print(chains_tup)
             data = np.array(
                 self.get('x,y,z,rowID,resName,name', chainID=chains))
             xyz[chains_tup] = data[:, :3].astype(float)

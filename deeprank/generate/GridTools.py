@@ -973,7 +973,6 @@ class GridToolsRAM(GridTools):
 
         # contact distance to locate the interface
         self.contact_distance = contact_distance
-        print(self.contact_distance)
 
 
         # progress bar
@@ -1201,7 +1200,6 @@ class GridToolsRAM(GridTools):
                     tmp[chname] = list(set(contacts + tmp[chname]))
 
             index = tmp
-            print(index.keys())
             # index = self.sqldb.get_contact_atoms(cutoff=self.contact_distance,
             #     chain1=self.chain1, chain2=self.chain2)
         else:
