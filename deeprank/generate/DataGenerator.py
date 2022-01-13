@@ -1766,6 +1766,18 @@ class DataGenerator(object):
                 molgrp['features/' + fn][:, 1:4] = xyz_rot
 
 class DataGeneratorRAM(DataGenerator):
+    def __init__(self, state_dict):
+        """
+        construct class instance from state dictionary.
+        """
+        self.all_pdb = state_dict['all_pdb']
+        self.local_pdbs = state_dict['local_pdbs']
+        self.mol_list = state_dict['mol_list']
+        self.pdb_path = state_dict['pdb_path']
+        self.pdb_select = state_dict['pdb_select']
+        self.pdb_source = state_dict['pdb_source']
+        self.data_dict = state_dict['data_dict']
+    
     def __init__(self, chain1, chain2,
                  pdb_select=None, pdb_source=None,
                  pdb_native=None, pssm_source=None, align=None,
@@ -2539,5 +2551,16 @@ class DataGeneratorRAM(DataGenerator):
         for mol in self.mol_list:
             self.data_dict[mol]['interface']._close()
             self.data_dict[mol]['interface'] = 42
+
+    def get_state_dict(self):
+        d = {'all_pdb' : self.all_pdb,
+             'local_pdbs' : self.local_pdbs,
+             'mol_list' : self.mol_list,
+             'pdb_path' : self.pdb_path,
+             'pdb_select' : self.pdb_select,
+             'pdb_source' : self.pdb_source,
+             'data_dict' : self.data_dict
+             }
+        return d
 
 
