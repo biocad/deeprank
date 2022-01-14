@@ -1,4 +1,3 @@
-from ast import arg
 import importlib
 import copy
 import os
@@ -1779,89 +1778,81 @@ class DataGeneratorRAM(DataGenerator):
     #     self.pdb_source = state_dict['pdb_source']
     #     self.data_dict = state_dict['data_dict']
     
-    def __init__(self, *args):
+    def __init__(self, chain1, chain2,
+                 pdb_select=None, pdb_source=None,
+                 pdb_native=None, pssm_source=None, align=None,
+                 compute_targets=None, compute_features=None,
+                 data_augmentation=None, hdf5='database.h5',
+                 mpi_comm=None):
 
-        if len(args) == 1:
-            state_dict = args[0]
-            self.all_pdb = state_dict['all_pdb']
-            self.local_pdbs = state_dict['local_pdbs']
-            self.mol_list = state_dict['mol_list']
-            self.pdb_path = state_dict['pdb_path']
-            self.pdb_select = state_dict['pdb_select']
-            self.pdb_source = state_dict['pdb_source']
-            self.data_dict = state_dict['data_dict']
+        self.chain1 = chain1
+        self.chain2 = chain2
 
+        self.pdb_select = pdb_select or []
+        self.pdb_source = []
+        self.mol_list = []
+
+        for name, pdb in pdb_source:
+            self.mol_list.append(name)
+            self.pdb_source.append(pdb)
+
+        self.pdb_native = pdb_native or []
+        self.pssm_source = pssm_source
+        self.align = align
+
+        if self.pssm_source is not None:
+            config.PATH_PSSM_SOURCE = self.pssm_source
+
+        self.compute_targets = compute_targets
+        self.compute_features = compute_features
+
+        self.data_augmentation = data_augmentation
+
+        self.hdf5 = hdf5
+
+        self.mpi_comm = mpi_comm
+
+        # set helper attributes
+        self.all_pdb = []
+        self.all_native = []
+        self.pdb_path = []
+
+        self.feature_error = []
+        self.grid_error = []
+        self.map_error = []
+
+        self.logger = logger
+
+        # handle the pdb_select
+        if not isinstance(self.pdb_select, list):
+            self.pdb_select = [self.pdb_select]
+
+        # handle the sources
+        if not isinstance(self.pdb_source, list):
+            self.pdb_source = [self.pdb_source]
+
+        # handle pssm source
+        pssm_features = ('deeprank.features.FullPSSM',
+                         'deeprank.features.PSSM_IC')
+        if self.compute_features and \
+                set.intersection(set(pssm_features), set(self.compute_features)):
+            if config.PATH_PSSM_SOURCE is None:
+                raise ValueError(
+                    'You must provide "pssm_source" to compute PSSM features.')
+
+        # handle the native
+        if not isinstance(self.pdb_native, list):
+            self.pdb_native = [self.pdb_native]
+
+        # filter the cplx if required
+        if self.pdb_select:
+            for i in self.pdb_select:
+                self.pdb_path += list(filter(lambda x: i in x,
+                                             self.all_pdb))
         else:
-            chain1, chain2, pdb_select, pdb_source, pdb_native, pssm_source, align, compute_targets, compute_features, data_augmentation, hdf5, mpi_comm = args
+            self.pdb_path = self.all_pdb
 
-            self.chain1 = chain1
-            self.chain2 = chain2
-
-            self.pdb_select = pdb_select or []
-            self.pdb_source = []
-            self.mol_list = []
-
-            for name, pdb in pdb_source:
-                self.mol_list.append(name)
-                self.pdb_source.append(pdb)
-
-            self.pdb_native = pdb_native or []
-            self.pssm_source = pssm_source
-            self.align = align
-
-            if self.pssm_source is not None:
-                config.PATH_PSSM_SOURCE = self.pssm_source
-
-            self.compute_targets = compute_targets
-            self.compute_features = compute_features
-
-            self.data_augmentation = data_augmentation
-
-            self.hdf5 = hdf5
-
-            self.mpi_comm = mpi_comm
-
-            # set helper attributes
-            self.all_pdb = []
-            self.all_native = []
-            self.pdb_path = []
-
-            self.feature_error = []
-            self.grid_error = []
-            self.map_error = []
-
-            self.logger = logger
-
-            # handle the pdb_select
-            if not isinstance(self.pdb_select, list):
-                self.pdb_select = [self.pdb_select]
-
-            # handle the sources
-            if not isinstance(self.pdb_source, list):
-                self.pdb_source = [self.pdb_source]
-
-            # handle pssm source
-            pssm_features = ('deeprank.features.FullPSSM',
-                            'deeprank.features.PSSM_IC')
-            if self.compute_features and \
-                    set.intersection(set(pssm_features), set(self.compute_features)):
-                if config.PATH_PSSM_SOURCE is None:
-                    raise ValueError(
-                        'You must provide "pssm_source" to compute PSSM features.')
-
-            # handle the native
-            if not isinstance(self.pdb_native, list):
-                self.pdb_native = [self.pdb_native]
-
-            # filter the cplx if required
-            if self.pdb_select:
-                for i in self.pdb_select:
-                    self.pdb_path += list(filter(lambda x: i in x,
-                                                self.all_pdb))
-            else:
-                self.pdb_path = self.all_pdb
-
-            self.data_dict = dict()
+        self.data_dict = dict()
 
     def create_database(
             self,
@@ -2569,7 +2560,20 @@ class DataGeneratorRAM(DataGenerator):
              'pdb_select' : self.pdb_select,
              'pdb_source' : self.pdb_source,
              'data_dict' : self.data_dict
-            }
+             }
         return d
 
+
+class DataGeneratorRAMFromStateDict(DataGeneratorRAM):
+    def __init__(self, state_dict):
+        """
+        construct class instance from state dictionary.
+        """
+        self.all_pdb = state_dict['all_pdb']
+        self.local_pdbs = state_dict['local_pdbs']
+        self.mol_list = state_dict['mol_list']
+        self.pdb_path = state_dict['pdb_path']
+        self.pdb_select = state_dict['pdb_select']
+        self.pdb_source = state_dict['pdb_source']
+        self.data_dict = state_dict['data_dict']
 
